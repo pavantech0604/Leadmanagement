@@ -1,3 +1,5 @@
+import {useCloudStorage} from './deployment';
+import {readCloudSource} from './cloud-database';
 import {createHash,randomUUID} from 'node:crypto';
 import fs from 'node:fs/promises';
 import * as XLSX from 'xlsx';
@@ -41,11 +43,12 @@ export function incrementFile(file:string){
 function validFile(file:string){return file.length<=180&&!!file.trim()&&!/[<>:"/\\|?*\x00-\x1f]/.test(file)&&!/[. ]$/.test(file)&&!/^\./.test(file)&&! /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(file)&&/\.xlsx$/i.test(file)}
 const poolCache=globalThis as typeof globalThis&{__cgPoolCache?:{signature:string;pools:Pools}};
 export async function loadBasePools():Promise<Pools>{
+ const cloud=useCloudStorage()?await readCloudSource():null;
  const file=process.env.TRANSFER_SOURCE_PATH||'data/source/capital-grow.xlsx';
- const stat=await fs.stat(file).catch(()=>{throw new TransferError('Source workbook is missing. Refresh the Google Sheet before transferring.',400)});
- const signature=`${file}:${stat.mtimeMs}:${stat.size}`;
+ const stat=cloud?null:await fs.stat(file).catch(()=>{throw new TransferError('Source workbook is missing. Refresh the Google Sheet before transferring.',400)});
+ const signature=cloud?`cloud:${cloud.hash}`:`${file}:${stat!.mtimeMs}:${stat!.size}`;
  if(poolCache.__cgPoolCache?.signature===signature&&hasCachedSourceReceipts())return poolCache.__cgPoolCache.pools;
- const buffer=await fs.readFile(file),w=XLSX.read(buffer,{type:'buffer',cellDates:false});
+ const buffer=cloud?.buffer||await fs.readFile(file),w=XLSX.read(buffer,{type:'buffer',cellDates:false});
  rememberSourceReceipts(receiptMetadata(w));
  const rows:Record<string,unknown[][]>={};for(const [language,pool] of Object.entries(poolMap))if(w.Sheets[pool.sheet])rows[language]=XLSX.utils.sheet_to_json<unknown[]>(w.Sheets[pool.sheet],{header:1,raw:true,defval:'',blankrows:true});
  const pools={hash:createHash('sha256').update(buffer).digest('hex'),rows};poolCache.__cgPoolCache={signature,pools};return pools;

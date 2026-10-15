@@ -1,3 +1,4 @@
+import {DeploymentError} from './deployment';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import fs from 'node:fs';
 import {Pool,type PoolClient,type QueryResultRow} from 'pg';
@@ -23,7 +24,7 @@ export async function cloudTransaction<T>(fn:()=>Promise<T>){
  if(shared.__cgCloudTransaction!.getStore())return fn();
  const client=await cloudPool().connect();try{await client.query('begin');await client.query("set local lock_timeout = '15s'");const result=await shared.__cgCloudTransaction!.run(client,fn);await client.query('commit');return result}catch(e){await client.query('rollback').catch(()=>{});throw e}finally{client.release()}
 }
-export async function readCloudStore(){const {rows}=await cloudQuery('select payload from capital_grow.workspace where id=1');if(!rows[0])throw new Error('The cloud workspace has not been initialized.');return rows[0].payload as Store}
+export async function readCloudStore(){const {rows}=await cloudQuery('select payload from capital_grow.workspace where id=1');if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');return rows[0].payload as Store}
 const sourceKey='capital-grow-language-pools';
 export async function reserveRecords(s:Store,before:Store){
  const existing=new Map((before.transfers||[]).map(t=>[t.id,t]));
@@ -31,7 +32,7 @@ export async function reserveRecords(s:Store,before:Store){
  for(const t of s.transfers||[]){if(existing.has(t.id))continue;
   await cloudQuery('insert into capital_grow.transfers(id,request_key,request_hash,file_name,floor,operator_id,committed_at,payload) values($1,$2,$3,$4,$5,$6,$7,$8)',[t.id,t.key,t.requestHash,t.file,t.floor,t.userId,t.at,t]);
   await cloudQuery('insert into capital_grow.file_reservations(normalized_name,operation_id) values(lower(btrim($1)),$2)',[t.file,t.operationId]);
-  for(const a of t.allocations)await cloudQuery('insert into capital_grow.row_allocations(source_key,language,row_number,operation_id) select $1,$2,n,$3 from generate_series($4::integer,$5::integer) n',[sourceKey,a.language,t.operationId,a.start,a.end]);
+  for(const a of t.mode==='reuse'?[]:t.allocations)await cloudQuery('insert into capital_grow.row_allocations(source_key,language,row_number,operation_id) select $1,$2,n,$3 from generate_series($4::integer,$5::integer) n',[sourceKey,a.language,t.operationId,a.start,a.end]);
  }
  const smart=new Set((s.transfers||[]).map(t=>t.operationId)),previous=new Map((before.operations||[]).map(r=>[r.id,JSON.stringify(r)]));
  for(const r of s.operations||[]){if(smart.has(r.id)||previous.get(r.id)===JSON.stringify(r))continue;
@@ -40,7 +41,7 @@ export async function reserveRecords(s:Store,before:Store){
  }
 }
 export async function mutateCloudStore<T>(fn:(s:Store)=>T|Promise<T>){return cloudTransaction(async()=>{
- const {rows}=await cloudQuery('select payload,revision,source_hash from capital_grow.workspace where id=1 for update');if(!rows[0])throw new Error('The cloud workspace has not been initialized.');
+ const {rows}=await cloudQuery('select payload,revision,source_hash from capital_grow.workspace where id=1 for update');if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');
  const s=rows[0].payload as Store,before=structuredClone(s),result=await fn(s);
  if(JSON.stringify(s)!==JSON.stringify(before)){
   await reserveRecords(s,before);

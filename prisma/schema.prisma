@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+model Company {
+  id String @id @default(uuid())
+  name String
+  branches Branch[]
+}
+model Branch {
+  id String @id @default(uuid())
+  name String
+  code String @unique
+  city String
+  address String?
+  contact String?
+  managerId String?
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  companyId String
+  company Company @relation(fields:[companyId],references:[id])
+  leads Lead[]
+  teams Team[]
+  memberships BranchMember[]
+  batches ImportBatch[]
+}
+model Role {
+  id String @id @default(uuid())
+  name String @unique
+  users User[]
+  permissions RolePermission[]
+}
+model Permission {
+  id String @id @default(uuid())
+  key String @unique
+  roles RolePermission[]
+}
+model RolePermission {
+  roleId String
+  permissionId String
+  role Role @relation(fields:[roleId],references:[id])
+  permission Permission @relation(fields:[permissionId],references:[id])
+  @@id([roleId,permissionId])
+}
+model User {
+  id String @id @default(uuid())
+  name String
+  email String @unique
+  passwordHash String?
+  active Boolean @default(true)
+  roleId String
+  role Role @relation(fields:[roleId],references:[id])
+  branches BranchMember[]
+  teams TeamMember[]
+  leads Lead[]
+}
+model BranchMember {
+  userId String
+  branchId String
+  user User @relation(fields:[userId],references:[id])
+  branch Branch @relation(fields:[branchId],references:[id])
+  @@id([userId,branchId])
+}
+model Team {
+  id String @id @default(uuid())
+  name String
+  branchId String
+  branch Branch @relation(fields:[branchId],references:[id])
+  members TeamMember[]
+}
+model TeamMember {
+  userId String
+  teamId String
+  user User @relation(fields:[userId],references:[id])
+  team Team @relation(fields:[teamId],references:[id])
+  @@id([userId,teamId])
+}
+model Language {
+  id String @id @default(uuid())
+  name String @unique
+  aliases String[]
+  active Boolean @default(true)
+  leads Lead[]
+}
+model Vendor {
+  id String @id @default(uuid())
+  name String @unique
+  active Boolean @default(true)
+  leads Lead[]
+  batches ImportBatch[]
+}
+model LeadSource {
+  id String @id @default(uuid())
+  name String
+  leads Lead[]
+}
+model Lead {
+  id String @id @default(uuid())
+  name String
+  originalPhone String
+  normalizedPhone String @unique
+  phoneCountryCode String?
+  nationalPhone String?
+  email String?
+  status String @default("New")
+  languageId String
+  language Language @relation(fields:[languageId],references:[id])
+  branchId String
+  branch Branch @relation(fields:[branchId],references:[id])
+  vendorId String
+  vendor Vendor @relation(fields:[vendorId],references:[id])
+  sourceId String?
+  source LeadSource? @relation(fields:[sourceId],references:[id])
+  batchId String?
+  batch ImportBatch? @relation(fields:[batchId],references:[id])
+  assignedTo String?
+  assignee User? @relation(fields:[assignedTo],references:[id])
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  active Boolean @default(true)
+  custom Json?
+  assignments Assignment[]
+  history StatusHistory[]
+  notes Note[]
+  followUps FollowUp[]
+  duplicates Duplicate[]
+  attachments Attachment[]
+  audit AuditLog[]
+  @@index([email])
+  @@index([branchId,createdAt])
+  @@index([languageId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([assignedTo])
+}
+model ImportBatch {
+  id String @id @default(uuid())
+  fileName String
+  uploadedBy String
+  vendorId String
+  vendor Vendor @relation(fields:[vendorId],references:[id])
+  branchId String
+  branch Branch @relation(fields:[branchId],references:[id])
+  totalRows Int
+  validRows Int @default(0)
+  duplicateRows Int @default(0)
+  errorRows Int @default(0)
+  status String @default("Pending")
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+  errorReportUrl String?
+  rows ImportRow[]
+  leads Lead[]
+}
+model ImportRow {
+  id String @id @default(uuid())
+  batchId String
+  batch ImportBatch @relation(fields:[batchId],references:[id])
+  rowNumber Int
+  raw Json
+  normalized Json?
+  status String
+  error String?
+  duplicates Duplicate[]
+  @@unique([batchId,rowNumber])
+}
+model Duplicate {
+  id String @id @default(uuid())
+  rowId String
+  row ImportRow @relation(fields:[rowId],references:[id])
+  matchedLeadId String
+  matchedLead Lead @relation(fields:[matchedLeadId],references:[id])
+  type String
+  status String @default("Pending")
+  reviewedBy String?
+  reviewedAt DateTime?
+}
+model Assignment {
+  id String @id @default(uuid())
+  leadId String
+  lead Lead @relation(fields:[leadId],references:[id])
+  assignedTo String
+  assignedBy String
+  assignedAt DateTime @default(now())
+}
+model StatusHistory {
+  id String @id @default(uuid())
+  leadId String
+  lead Lead @relation(fields:[leadId],references:[id])
+  oldStatus String?
+  newStatus String
+  changedBy String
+  changedAt DateTime @default(now())
+}
+model FollowUp {
+  id String @id @default(uuid())
+  leadId String
+  lead Lead @relation(fields:[leadId],references:[id])
+  assignedTo String
+  dueAt DateTime
+  outcome String?
+  remarks String?
+  nextAction String?
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([dueAt,assignedTo])
+}
+model Note {
+  id String @id @default(uuid())
+  leadId String
+  lead Lead @relation(fields:[leadId],references:[id])
+  text String
+  createdBy String
+  createdAt DateTime @default(now())
+}
+model Attachment {
+  id String @id @default(uuid())
+  leadId String
+  lead Lead @relation(fields:[leadId],references:[id])
+  storageKey String
+  fileName String
+  uploadedBy String
+  createdAt DateTime @default(now())
+}
+model AuditLog {
+  id String @id @default(uuid())
+  userId String
+  role String
+  action String
+  oldValue Json?
+  newValue Json?
+  ipAddress String?
+  leadId String?
+  lead Lead? @relation(fields:[leadId],references:[id])
+  branchId String?
+  createdAt DateTime @default(now())
+  @@index([branchId,createdAt])
+}
+model Setting {
+  key String @id
+  value Json
+  updatedAt DateTime @updatedAt
+}

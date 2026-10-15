@@ -1,0 +1,51 @@
+{
+  "name": "branchflow",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "test": "tsx --test tests/engine.test.ts tests/operations.test.ts tests/backups.test.ts tests/store-backup.test.ts tests/transfers.test.ts tests/transfers-store.test.ts tests/lead-summary.test.ts tests/pool-append.test.ts tests/import-series.test.ts tests/google-sync.test.ts tests/google-script.test.ts",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "test:api": "node tests/api-smoke.mjs",
+    "backup": "tsx scripts/create-backup.ts",
+    "test:transfers:api": "node tests/transfers-api.mjs",
+    "lint": "eslint app components lib --max-warnings 0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "@supabase/supabase-js": "2.109.0",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.12",
+    "libphonenumber-js": "^1.13.15",
+    "lucide-react": "^1.55.0",
+    "next": "^16.4.0",
+    "papaparse": "^5.7.0",
+    "pg": "8.23.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "recharts": "^3.10.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "^26.6.5",
+    "@types/papaparse": "^5.5.2",
+    "@types/pg": "8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "10.12.0",
+    "prisma": "^6.19.0",
+    "supabase": "2.120.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "8.71.2"
+  },
+  "overrides": {
+    "effect": "3.20.0",
+    "deepmerge-ts": "8.0.0"
+  }
+}

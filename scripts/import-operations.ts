@@ -1,0 +1,6 @@
+import fs from 'node:fs/promises';
+import {mutate} from '../lib/store';
+import {readOperationsWorkbook} from '../lib/sheet-source';
+async function main(){const records=readOperationsWorkbook(await fs.readFile('data/source/capital-grow.xlsx'));const result=await mutate(s=>{s.operations??=[];let added=0;for(const r of records){const existing=s.operations.find(x=>x.sourceSheet===r.sourceSheet&&x.sourceRow===r.sourceRow);if(existing){Object.assign(existing,r,{id:existing.id})}else{s.operations.push(r);added++}}s.operationsSyncAt=new Date().toISOString();if(!s.audit.some(a=>a.action==='Google Sheet registers migrated'))s.audit.unshift({id:crypto.randomUUID(),at:s.operationsSyncAt,by:'Capital Grow owner',role:'Admin',action:'Google Sheet registers migrated',old:null,next:{source:'UPDATE and MMS LEAD REPORT',records:records.length}});return {added,receipts:records.filter(r=>r.kind==='receipt').length,dispatches:records.filter(r=>r.kind==='dispatch').length,review:records.filter(r=>r.count===null).length,receivedMatched:records.filter(r=>r.kind==='receipt').reduce((n,r)=>n+(r.actualCount||0),0),sentMatched:records.filter(r=>r.kind==='dispatch').reduce((n,r)=>n+(r.actualCount||0),0)}});console.log(result)}main();
+
+

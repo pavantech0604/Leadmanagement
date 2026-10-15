@@ -1,0 +1,6 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+test('data mutations create recoverable backups; backup failure prevents primary save',async()=>{const root=await fs.mkdtemp(path.join(os.tmpdir(),'capital-grow-store-test-'));process.env.WORKSPACE_FILE=path.join(root,'workspace.json');process.env.BACKUP_DIRECTORY=path.join(root,'backups');try{const {readStore,mutate}=await import('../lib/store');await readStore();await mutate(s=>{s.vendors.push('Backup test vendor')});const dirs=await fs.readdir(path.join(root,'backups'));assert.equal(dirs.length,1);const restored=JSON.parse(await fs.readFile(path.join(root,'backups',dirs[0],'workspace.json'),'utf8'));assert.ok(restored.vendors.includes('Backup test vendor'));const old=await fs.readFile(path.join(root,'workspace.json'),'utf8');const blocked=path.join(root,'blocked-file');await fs.writeFile(blocked,'not a directory');process.env.BACKUP_DIRECTORY=blocked;await assert.rejects(mutate(s=>{s.vendors.push('Must not save')}));assert.equal(await fs.readFile(path.join(root,'workspace.json'),'utf8'),old)}finally{delete process.env.WORKSPACE_FILE;delete process.env.BACKUP_DIRECTORY;await fs.rm(root,{recursive:true,force:true})}});

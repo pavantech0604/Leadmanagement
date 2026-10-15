@@ -1,0 +1,11 @@
+export const statuses=['New','Assigned','Contacted','Interested','Follow-up','Not reachable','Invalid number','Converted','Dead','Archived'] as const;
+export type Role='Admin'|'Manager'|'Team Leader'|'Employee';
+export type User={id:string;name:string;email:string;role:Role;branchIds:string[];team:string};
+export type Branch={id:string;name:string;company:string;code:string;city:string;manager:string;active:boolean};
+export type Lead={id:string;name:string;phone:string;originalPhone:string;email:string;language:string;branchId:string;vendor:string;status:string;assignedTo:string;createdAt:string;followUp:string;notes:{text:string;at:string;by:string}[];history:{action:string;at:string;by:string}[];custom:Record<string,string>};
+export type ImportRow={row:number;raw:Record<string,string>;name:string;phone:string;email:string;language:string;languageSource?:string;state:'Valid'|'Duplicate'|'Potential duplicate'|'Error';reason:string;existingId?:string};
+export type GoogleSync={series?:string;clientId?:string;at:string;spreadsheetId:string;reportRow:number;written:number;held:number;ranges:Record<string,string>;conflictRows:number[]};
+export type SyncJob={status:'pending'|'syncing'|'error'|'synced';attempts:number;updatedAt:string;message?:string};
+export type Batch={appendRanges?:{language:string;start:number;count:number}[];syncJob?:SyncJob;sourceFile?:string;series?:string;clientId?:string;checkedExisting?:number;poolAppends?:import('./pool-append').PoolAppend[];googleSync?:GoogleSync;id:string;file:string;branchId:string;vendor:string;at:string;by:string;total:number;valid:number;duplicates:number;errors:number;rows:ImportRow[]};
+export type Audit={id:string;at:string;by:string;role:string;action:string;leadId?:string;branchId?:string;old:unknown;next:unknown};
+export type Store={users:User[];branches:Branch[];vendors:string[];languages:string[];leads:Lead[];batches:Batch[];audit:Audit[];operations?:import('./operations').Operation[];operationsSyncAt?:string;transfers?:import('./transfers').Transfer[]};

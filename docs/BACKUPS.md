@@ -1,0 +1,17 @@
+# Automatic local backups
+
+Valid contact-file imports automatically add one MMS receipt with language groups and validated counts. Its ranges refer to rows in the uploaded vendor file, not AP/TN/KA/HI/KL. The original batch and receipt are linked by series ID. Upload receipts are read-only to preserve their validated counts. Uploading alone does not record a delivery: use Send to floor to add the UPDATE record when the leads are actually dispatched.
+
+Every successful data-changing application request writes a complete versioned snapshot before replacing the primary `data/workspace.json` file. A snapshot contains `workspace.json` for complete app recovery and `capital-grow-backup.xlsx` as a readable copy. If snapshot creation fails, the primary record save is blocked and the UI returns the backup error. Preview and unchanged requests do not create snapshots.
+
+Snapshots are saved under `data/backups/<timestamp>-<id>/`. All versions are retained; nothing is automatically deleted. Set BACKUP_DIRECTORY to an absolute folder on another disk or an already configured OneDrive/Google Drive desktop sync folder for an off-device copy. Availability of that folder is required during saves. This application does not install, sign into, or verify cloud-sync software.
+
+The Excel workbook contains UPDATE and MMS LEAD REPORT from the current app registers, preserving the original leading columns and adding matched counts, notes and provenance. AP/TN/KA/HI/KL are retained from the most recently read source snapshot, with row positions unchanged. New app contact imports are retained in IMPORTED CONTACTS, with batch summaries in IMPORT HISTORY. Unrelated source tabs are excluded. All customer data remains personal data; keep the backup directory access restricted.
+
+The owner can use Download Excel backup on the daily desk. GET /api/backup exports the current workbook; GET /api/backup?status=1 returns snapshot status. Both require the owner/Admin session. `npm run backup` makes an on-demand local snapshot.
+
+Google Sheets is not modified. Refresh sheet remains a one-way read of the original source. Automatic local backup is not continuous Google synchronization or a mirror of newly imported contacts into the language pools. For direct Google write-back, configure a Google Sheets service account/OAuth identity with access to the exact workbook, then implement an idempotent outbox with retries and a visible sync status. Do not place Google credentials in frontend code. New contact uploads need a defined language-pool append policy before their ranges can refer to Google source row numbers.
+
+Recovery: stop the application, preserve the current data folder, inspect the desired snapshot, and copy its workspace.json to data/workspace.json. Language-pool reference data can be recovered from the corresponding backup workbook by replacing data/source/capital-grow.xlsx after checking its AP/TN/KA/HI/KL rows. Restart the app. These are manual recovery steps, not an implemented restore button. A snapshot is written before the primary file, so in the rare case the primary write fails it may contain a prepared change that was not committed; verify the records before restoring.
+
+This is still a single-process local file adapter. PostgreSQL with encrypted offsite backups is the recommended production main store. A second copy on the same disk protects against app mistakes but does not protect against disk loss.

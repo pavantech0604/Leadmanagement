@@ -6,7 +6,7 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "test": "tsx --test tests/engine.test.ts tests/operations.test.ts tests/backups.test.ts tests/store-backup.test.ts tests/transfers.test.ts tests/transfers-store.test.ts tests/lead-summary.test.ts tests/pool-append.test.ts tests/import-series.test.ts tests/google-sync.test.ts tests/google-script.test.ts tests/deployment.test.ts",
+    "test": "tsx --test tests/engine.test.ts tests/operations.test.ts tests/backups.test.ts tests/store-backup.test.ts tests/transfers.test.ts tests/transfers-store.test.ts tests/lead-summary.test.ts tests/pool-append.test.ts tests/import-series.test.ts tests/google-sync.test.ts tests/google-script.test.ts tests/deployment.test.ts tests/build-config.test.mjs",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "test:api": "node tests/api-smoke.mjs",
@@ -48,5 +48,11 @@
   "overrides": {
     "effect": "3.20.0",
     "deepmerge-ts": "8.0.0"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.0": true,
+    "@prisma/engines@6.19.0": true,
+    "esbuild@0.28.2": true,
+    "prisma@6.19.0": true
   }
 }

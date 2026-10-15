@@ -31,3 +31,9 @@ Vercel cannot read private files on your PC. Never commit those files to Git or 
 The current production entry screen deliberately blocks local profile login. These storage changes do not implement Supabase Auth. Verified production authentication and membership authorization must be completed before the hosted application can be used. Do not enable demo login on a public deployment to bypass this requirement.
 
 Google Apps Script connection settings are currently local files. Hosted Google write-back also requires a durable private connection configuration and a scheduled retry runner; copying local connection files into Git is not supported.
+
+## Install warnings and build cache
+
+The repository uses npm ci and its committed lockfile for reproducible Vercel installs. Version-specific dependency script approvals live in package.json. The build wrapper translates the legacy npm_config_cache_dir / npm_config_cache-dir alias into npm_config_cache before npm starts. It preserves the cache directory and does not hide warnings or disable security auditing.
+
+Next.js build caching is managed by Vercel; do not delete it on every build. After changing install settings, redeploy once with **Use existing Build Cache** unchecked if an earlier dependency cache is stale. Subsequent deployments can use the cache normally. Project dashboard overrides for install/build commands should be cleared so vercel.json applies.

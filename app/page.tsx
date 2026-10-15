@@ -37,7 +37,7 @@ export default function App(){
  const [importSources,setImportSources]=useState<ImportSource[]>([]);
  const [previewLanguage,setPreviewLanguage]=useState('all');
  const importColumns=useMemo(()=>Array.from(new Set(raw.flatMap(r=>Object.keys(r)))),[raw]);
- async function load(){const r=await fetch('/api/workspace');const d=await r.json().catch(()=>({error:'Unable to load workspace'}));if(!r.ok)throw new Error(d.error||'Unable to load workspace');setData(d)}
+ async function load(){const r=await fetch('/api/workspace',{cache:'no-store'});const d=await r.json().catch(()=>({error:'Unable to load workspace'}));if(!r.ok)throw new Error(d.error||'Unable to load workspace');setData(d)}
  useEffect(()=>{
   if(!data?.user||(data.user.role!=='Admin'&&data.user.id!=='u1'))return;
   let active=true,timer:ReturnType<typeof setTimeout>|undefined,previousPending:number|null=null;

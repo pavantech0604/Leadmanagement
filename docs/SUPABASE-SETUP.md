@@ -19,8 +19,7 @@ data has been imported.
 - An initial PostgreSQL adapter in `lib/cloud-database.ts`.
 
 The adapter is selected by `STORAGE_BACKEND=supabase`; the default development mode remains local. Vercel refuses local storage. See [Vercel setup](VERCEL-SETUP.md) for private initialization and required environment variables.
-The adapter still requires PostgreSQL integration testing. Applying these migrations
-does not establish application authentication, MFA, cloud backups, or app deployment.
+Production email/password sign-in now verifies Supabase identity and private active membership, supports enrolled TOTP verification, and uses signed server cookies. Real account and publishable-key configuration are still required. Independent backups and hosted end-to-end verification remain deployment responsibilities.
 
 ## Resume deployment
 

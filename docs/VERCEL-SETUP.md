@@ -26,9 +26,17 @@ The command reads private data/workspace.json and data/source/capital-grow.xlsx.
 
 Vercel cannot read private files on your PC. Never commit those files to Git or use /tmp as permanent lead storage. Cloud saves use database transactions and workspace versions; configure independent database backups as well.
 
-## Authentication is a separate deployment requirement
+## Production email/password authentication
 
-The current production entry screen deliberately blocks local profile login. These storage changes do not implement Supabase Auth. Verified production authentication and membership authorization must be completed before the hosted application can be used. Do not enable demo login on a public deployment to bypass this requirement.
+Add server-only `SUPABASE_URL=https://taxqsqczqtvlzcblmlig.supabase.co` and `SUPABASE_PUBLISHABLE_KEY` (from Supabase project Settings → API Keys). A legacy anon key is also accepted using SUPABASE_ANON_KEY. Do not use the service-role key or database password as the Auth key. Redeploy after setting these values.
+
+In Supabase Authentication → Users, the owner must have a confirmed email/password Auth account for capitalgrow8651@gmail.com. Create that account privately through Supabase administration if it does not exist. The Supabase dashboard password and PostgreSQL database password are separate from the application user's Auth password. Do not put user passwords into Vercel variables or source code.
+
+The existing private memberships migration authorizes only the designated owner. A verified Auth login is insufficient without an active matching membership and existing app user. First sign-in atomically binds the Auth UUID; further accounts cannot claim an already bound identity. Operators require explicit administrator provisioning in the private memberships table. There is no public signup UI.
+
+Sessions use a signed HttpOnly cookie, Secure in production, SameSite=Strict, one-hour expiry, issuer/audience verification and a live active-membership check on every authenticated request. Logging out clears the cookie. Membership deactivation revokes workspace access. Supabase tokens are kept server-side only during login; no tokens or credentials are stored in browser localStorage. Authenticator MFA is requested for enrolled TOTP accounts. Unsupported MFA methods fail closed.
+
+Local profile sign-in is rejected whenever cloud storage is active, including development. Login attempts are limited per client through database rate-limit counters. Existing cookies from the local profile implementation are invalidated by the new session format.
 
 Google Apps Script connection settings are currently local files. Hosted Google write-back also requires a durable private connection configuration and a scheduled retry runner; copying local connection files into Git is not supported.
 

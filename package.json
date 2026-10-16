@@ -6,7 +6,7 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "test": "tsx --test tests/engine.test.ts tests/operations.test.ts tests/backups.test.ts tests/store-backup.test.ts tests/transfers.test.ts tests/transfers-store.test.ts tests/lead-summary.test.ts tests/pool-append.test.ts tests/import-series.test.ts tests/google-sync.test.ts tests/google-script.test.ts tests/deployment.test.ts tests/build-config.test.mjs",
+    "test": "tsx --test tests/engine.test.ts tests/operations.test.ts tests/backups.test.ts tests/store-backup.test.ts tests/transfers.test.ts tests/transfers-store.test.ts tests/lead-summary.test.ts tests/pool-append.test.ts tests/import-series.test.ts tests/google-sync.test.ts tests/google-script.test.ts tests/deployment.test.ts tests/build-config.test.mjs tests/production-auth.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "test:api": "node tests/api-smoke.mjs",

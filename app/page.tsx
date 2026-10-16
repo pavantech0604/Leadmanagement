@@ -71,7 +71,7 @@ export default function App(){
  try{const content=await f.arrayBuffer();if(importWorker.current===worker)worker.postMessage({content,name:f.name},[content])}catch(e){if(importWorker.current===worker)setImportError((e as Error).message);finish()}
  }
 
- if(error)return <div className="login"><AlertCircle size={36}/><h1>Workspace couldn’t load</h1><p>{error}</p><button onClick={()=>location.reload()}>Try again</button></div>;
+ if(error)return <main className="workspace-unavailable"><section role="alert"><span className="workspace-unavailable-icon"><AlertCircle size={28}/></span><span className="ops-eyebrow">CAPITAL GROW · CONNECTION STATUS</span><h1>Workspace connection needs attention</h1><p>{error}</p><button className="button primary" disabled={busy} onClick={async()=>{setBusy(true);try{await load();setError('')}catch(e){setError((e as Error).message)}finally{setBusy(false)}}}>{busy?<Loader2 className="spin" size={16}/>:null}{busy?'Checking connection…':'Retry connection'}</button><small>Your existing records have not been replaced. Update the deployment settings, then retry.</small></section></main>;
  if(!data)return <div className="login"><Loader2 className="spin"/><h2>Opening your workspace…</h2></div>;
  if(data.login)return <><WorkspaceEntry busy={busy} production={!data.users.length} enter={id=>api({action:'login',userId:id}).catch(()=>{})}/>{toast&&<div className="toast">{toast}<button onClick={()=>setToast('')}><X size={15}/></button></div>}</>;
  const opsPage=['Overview','MMS receipts','Floor updates','Daily reports'].includes(page);

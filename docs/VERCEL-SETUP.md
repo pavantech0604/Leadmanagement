@@ -37,3 +37,9 @@ Google Apps Script connection settings are currently local files. Hosted Google 
 The repository uses npm ci and its committed lockfile for reproducible Vercel installs. Version-specific dependency script approvals live in package.json. The build wrapper translates the legacy npm_config_cache_dir / npm_config_cache-dir alias into npm_config_cache before npm starts. It preserves the cache directory and does not hide warnings or disable security auditing.
 
 Next.js build caching is managed by Vercel; do not delete it on every build. After changing install settings, redeploy once with **Use existing Build Cache** unchecked if an earlier dependency cache is stale. Subsequent deployments can use the cache normally. Project dashboard overrides for install/build commands should be cleared so vercel.json applies.
+
+## If workspace returns 503 after configuration
+
+The updated error identifies invalid URL schemes, unchanged password placeholders, database authentication/permission errors, unreachable hosts, missing migrations, uninitialized workspace and TLS failures. For network failures, use the Session pooler URI rather than an IPv6-only direct database host. For certificate-chain failures, obtain the trusted database CA from your Supabase project and put its PEM content in server-only SUPABASE_DB_CA_CERT (actual newlines or escaped \n are supported). Never disable certificate verification. Redeploy after editing environment variables.
+
+If the error remains generic, inspect the failed /api/workspace request in Vercel runtime logs. The public error response intentionally does not expose database credentials. Production sign-in and private data initialization remain separate requirements.

@@ -1,4 +1,4 @@
-import {DeploymentError} from './deployment';
+import {DeploymentError,databaseConnectionUrl} from './deployment';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import fs from 'node:fs';
 import {Pool,type PoolClient,type QueryResultRow} from 'pg';
@@ -11,11 +11,11 @@ shared.__cgCloudTransaction??=new AsyncLocalStorage<PoolClient>();
 export function cloudPool(){
  if(!shared.__cgCloudPool){
   const connectionString=process.env.SUPABASE_DATABASE_URL;if(!connectionString)throw new Error('Secure database connection is not configured.');
-  const url=new URL(connectionString);const local=['localhost','127.0.0.1','::1'].includes(url.hostname);
+  const url=databaseConnectionUrl(connectionString);const local=['localhost','127.0.0.1','::1'].includes(url.hostname);
   if(!local&&!url.hostname.endsWith('.supabase.co')&&!url.hostname.endsWith('.pooler.supabase.com'))throw new Error('Unexpected database host.');
   // Strip connection-string SSL switches so they cannot disable verification.
   for(const key of ['sslmode','sslcert','sslkey','sslrootcert'])url.searchParams.delete(key);
-  shared.__cgCloudPool=new Pool({connectionString:url.toString(),max:5,connectionTimeoutMillis:10000,idleTimeoutMillis:30000,statement_timeout:30000,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
+  shared.__cgCloudPool=new Pool({connectionString:url.toString(),max:2,connectionTimeoutMillis:10000,idleTimeoutMillis:30000,statement_timeout:30000,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_CERT?{ca:process.env.SUPABASE_DB_CA_CERT.replace(/\\n/g,'\n')}:process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
  }
  return shared.__cgCloudPool;
 }

@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
 import * as XLSX from 'xlsx';
 import {cloudTransaction,cloudQuery,saveCloudSource,cloudPool} from '../lib/cloud-database';
-import {useCloudStorage} from '../lib/deployment';
+import {useCloudStorage,databaseConnectionUrl,DeploymentError,workspaceFailure} from '../lib/deployment';
 import type {Store} from '../lib/types';
 async function main(){
  if(!useCloudStorage())throw Error('Set STORAGE_BACKEND=supabase, SUPABASE_DATABASE_URL and SESSION_SECRET in your private local environment.');
+ databaseConnectionUrl(process.env.SUPABASE_DATABASE_URL||'');
+ if(process.env.SUPABASE_DB_CA_PATH)await fs.access(process.env.SUPABASE_DB_CA_PATH).catch(()=>{throw new DeploymentError('The certificate file in SUPABASE_DB_CA_PATH does not exist. Use Copy as path on your downloaded certificate and update .env.local.');});
  const workspace=JSON.parse(await fs.readFile(process.env.WORKSPACE_FILE||'data/workspace.json','utf8')) as Store;
  const original=XLSX.read(await fs.readFile(process.env.TRANSFER_SOURCE_PATH||'data/source/capital-grow.xlsx'),{type:'buffer'});
  const sanitized=XLSX.utils.book_new();
@@ -24,4 +26,4 @@ async function main(){
  });
  console.log('Private cloud workspace initialized. Existing cloud data was not overwritten.');
 }
-main().catch(()=>{console.error('Cloud initialization failed. Check the private database connection, migrations and whether a workspace already exists. No existing workspace was overwritten.');process.exitCode=1}).finally(()=>{try{return cloudPool().end()}catch{return}});
+main().catch(error=>{const code=(error as {code?:string})?.code;const message=code==='23505'?'A cloud workspace already exists. Initialization will not overwrite it.':code==='ENOENT'?'A required local workspace or source file is missing. Check WORKSPACE_FILE and TRANSFER_SOURCE_PATH.':workspaceFailure(error).message;console.error('Cloud initialization failed: '+message);console.error('No existing workspace was overwritten.');process.exitCode=1}).finally(()=>{try{return cloudPool().end()}catch{return}});

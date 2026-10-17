@@ -1,0 +1,4 @@
+import {NextResponse} from 'next/server';
+import {readStore} from '@/lib/store';import {session} from '@/lib/auth';import {canTransfer} from '@/lib/transfers';
+export const runtime='nodejs';
+export async function GET(_req:Request,{params}:{params:Promise<{id:string}>}){const s=await readStore(),user=await session(s);if(!user||!canTransfer(user))return NextResponse.json({error:'Access denied'},{status:403});const {id}=await params,sale=s.sales?.find(sale=>sale.id===id);if(!sale||sale.status!=='completed')return NextResponse.json({error:'Active sale not found'},{status:404});return new NextResponse(Buffer.from(sale.artifact,'base64'),{headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="${sale.file}"`,'Cache-Control':'private, no-store'}});}

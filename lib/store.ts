@@ -1,3 +1,4 @@
+import {assertSaleLedgerChanges} from './lead-finance';
 import {useCloudStorage} from './deployment';
 import {readCloudStore,mutateCloudStore} from './cloud-database';
 import fs from 'node:fs/promises';
@@ -20,4 +21,4 @@ async function save(s:Store){await fs.mkdir(path.dirname(file),{recursive:true})
 // Share the queue across route bundles and development reloads in this process.
 const storeQueues=globalThis as typeof globalThis&{__capitalGrowStoreQueues?:Map<string,Promise<void>>};
 storeQueues.__capitalGrowStoreQueues??=new Map();
-export function mutate<T>(fn:(s:Store)=>T|Promise<T>):Promise<T>{if(useCloudStorage())return mutateCloudStore(fn);const queues=storeQueues.__capitalGrowStoreQueues!;const task=(queues.get(file)||Promise.resolve()).then(async()=>{const s=await readStore();const before=JSON.stringify(s);const result=await fn(s);if(JSON.stringify(s)!==before){await writeSnapshot(s,{jsonOnly:true});await save(s)}return result});queues.set(file,task.then(()=>{},()=>{}));return task}
+export function mutate<T>(fn:(s:Store)=>T|Promise<T>):Promise<T>{if(useCloudStorage())return mutateCloudStore(fn);const queues=storeQueues.__capitalGrowStoreQueues!;const task=(queues.get(file)||Promise.resolve()).then(async()=>{const s=await readStore();const before=JSON.stringify(s);const result=await fn(s);assertSaleLedgerChanges(JSON.parse(before),s);if(JSON.stringify(s)!==before){await writeSnapshot(s,{jsonOnly:true});await save(s)}return result});queues.set(file,task.then(()=>{},()=>{}));return task}

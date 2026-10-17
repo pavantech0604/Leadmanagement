@@ -1,0 +1,2 @@
+export const money=(paise:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(paise/100);
+export function parsePrice(value:string){if(!/^\d{1,6}(?:\.\d{1,2})?$/.test(value.trim()))throw Error('Enter a price in rupees with up to two decimal places.');const [whole,fraction='']=value.trim().split('.');return Number(whole)*100+Number(fraction.padEnd(2,'0'));}

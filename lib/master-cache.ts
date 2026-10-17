@@ -8,6 +8,8 @@ export function cachedSourceReceipts(){return globalCache.__cgMasterRefresh?.rec
 export function hasCachedSourceReceipts(){return globalCache.__cgMasterRefresh?.receipts!==undefined;}
 export function rememberSourceReceipts(receipts:Operation[]){const state=globalCache.__cgMasterRefresh??={attempt:0};state.receipts=receipts;}
 export async function refreshMasterInBackground(s:Store){
+ // An explicitly supplied local workbook is managed separately; never overwrite it in the background.
+ if(process.env.TRANSFER_SOURCE_PATH)return;
  const state=globalCache.__cgMasterRefresh??={attempt:0};
  if(state.pending)return state.pending;
  const stat=useCloudStorage()?null:await fs.stat('data/source/capital-grow.xlsx').catch(()=>null);

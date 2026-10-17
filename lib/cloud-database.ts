@@ -1,3 +1,4 @@
+import {assertSaleLedgerChanges} from './lead-finance';
 import {DeploymentError,databaseConnectionUrl} from './deployment';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import fs from 'node:fs';
@@ -27,6 +28,7 @@ export async function cloudTransaction<T>(fn:()=>Promise<T>){
 export async function readCloudStore(){const {rows}=await cloudQuery('select payload from capital_grow.workspace where id=1');if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');return rows[0].payload as Store}
 const sourceKey='capital-grow-language-pools';
 export async function reserveRecords(s:Store,before:Store){
+ assertSaleLedgerChanges(before,s);
  const existing=new Map((before.transfers||[]).map(t=>[t.id,t]));
  for(const t of before.transfers||[])if(JSON.stringify(s.transfers?.find(v=>v.id===t.id))!==JSON.stringify(t))throw new Error('Committed transfers cannot be changed or removed.');
  for(const t of s.transfers||[]){if(existing.has(t.id))continue;

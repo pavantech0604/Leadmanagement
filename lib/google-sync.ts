@@ -9,7 +9,7 @@ type Connection={token:string;url?:string};
 const connectionFile=()=>process.env.GOOGLE_SYNC_CONNECTION_FILE||path.join(process.cwd(),'data','private','google-connection.json');
 async function connection():Promise<Connection|null>{
  if(process.env.GOOGLE_SYNC_URL){
-  return {url:process.env.GOOGLE_SYNC_URL,token:process.env.GOOGLE_SYNC_TOKEN||''};
+  return {url:process.env.GOOGLE_SYNC_URL,token:(process.env.GOOGLE_SYNC_TOKEN?.trim()||process.env.Google_sync_token?.trim()||'')};
  }
  try{return JSON.parse(await fs.readFile(connectionFile(),'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}
 }

@@ -63,6 +63,20 @@ export async function readCloudStore(view=false,includeContacts=true){
   }
  }
 }
+// Import validation needs identity columns, not contact history or raw import rows.
+export async function readCloudImportStore():Promise<Store>{
+ const {rows}=await cloudQuery<{payload:Store}>(`select jsonb_build_object(
+  'users',payload->'users','branches',payload->'branches','languages',payload->'languages','operations',payload->'operations',
+  'leads',coalesce((select jsonb_agg(jsonb_build_object('id',l->'id','name',l->'name','phone',l->'phone','email',l->'email') order by n) from jsonb_array_elements(payload->'leads') with ordinality as x(l,n)),'[]'::jsonb),
+  'batches',coalesce((select jsonb_agg(jsonb_build_object('id',b->'id','file',b->'file','googleSync',b->'googleSync','poolAppends',b->'poolAppends') order by n) from jsonb_array_elements(payload->'batches') with ordinality as x(b,n)),'[]'::jsonb)
+ ) as payload from capital_grow.workspace where id=1`);
+ if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized.');
+ return rows[0].payload;
+}
+export async function readCloudSourceHash(){
+ const {rows}=await cloudQuery<{source_hash:string}>('select source_hash from capital_grow.workspace where id=1');
+ return rows[0]?.source_hash;
+}
 const sourceKey='capital-grow-language-pools';
 export async function reserveRecords(s:Store,before:Store){
  assertSaleLedgerChanges(before,s);

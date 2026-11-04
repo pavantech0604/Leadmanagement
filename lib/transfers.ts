@@ -1,5 +1,5 @@
 import {useCloudStorage} from './deployment';
-import {readCloudSource} from './cloud-database';
+import {readCloudSource,readCloudSourceHash} from './cloud-database';
 import {createHash,randomUUID} from 'node:crypto';
 import fs from 'node:fs/promises';
 import * as XLSX from 'xlsx';
@@ -43,7 +43,12 @@ export function incrementFile(file:string){
 function validFile(file:string){return file.length<=180&&!!file.trim()&&!/[<>:"/\\|?*\x00-\x1f]/.test(file)&&!/[. ]$/.test(file)&&!/^\./.test(file)&&! /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(file)&&/\.xlsx$/i.test(file)}
 const poolCache=globalThis as typeof globalThis&{__cgPoolCache?:{signature:string;pools:Pools}};
 export async function loadBasePools():Promise<Pools>{
- const cloud=useCloudStorage()?await readCloudSource():null;
+ const isCloud=useCloudStorage();
+ if(isCloud&&poolCache.__cgPoolCache&&hasCachedSourceReceipts()){
+  const sourceHash=await readCloudSourceHash();
+  if(sourceHash&&poolCache.__cgPoolCache.signature===`cloud:${sourceHash}`)return poolCache.__cgPoolCache.pools;
+ }
+ const cloud=isCloud?await readCloudSource():null;
  const file=process.env.TRANSFER_SOURCE_PATH||'data/source/capital-grow.xlsx';
  const stat=cloud?null:await fs.stat(file).catch(()=>{throw new TransferError('Source workbook is missing. Refresh the Google Sheet before transferring.',400)});
  const signature=cloud?`cloud:${cloud.hash}`:`${file}:${stat!.mtimeMs}:${stat!.size}`;

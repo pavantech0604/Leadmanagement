@@ -1,7 +1,7 @@
 import {financeSummary,publicSale,purchaseCost} from '@/lib/lead-finance';
 import {parsePrice} from '@/lib/money';
 import {reconcileGoogleRegisters} from '@/lib/register-reconciliation';
-import {cloudEnabled,readCloudStore} from '@/lib/cloud-database';
+import {cloudEnabled,readCloudStore,readCloudImportStore} from '@/lib/cloud-database';
 import {workspaceFailure} from '@/lib/deployment';
 import {NextRequest,NextResponse,after} from 'next/server';
 import {cookies} from 'next/headers';
@@ -25,12 +25,29 @@ function audit(s:Store,u:User,action:string,old:unknown,next:unknown,lead?:Lead)
 const workspaceJson=(body:unknown)=>NextResponse.json(body,{headers:{'Cache-Control':'private, no-store, max-age=0'}});
 export async function GET(req:NextRequest){try{if((process.env.NODE_ENV==='production'||cloudEnabled())&&!(await cookies()).has('bf-session'))return workspaceJson({login:true,users:[]});const s:Store&{auditTotal?:number}=cloudEnabled()?await readCloudStore(true,req.nextUrl.searchParams.get('overview')!=='1'):await readStore();const u=await session(s);if(!u)return workspaceJson({login:true,users:process.env.NODE_ENV!=='production'&&!cloudEnabled()?s.users.filter(x=>['u0','u1'].includes(x.id)):[]});return workspaceJson({financeSummary:canTransfer(u)?financeSummary(s):undefined,sales:canTransfer(u)?(s.sales||[]).map(publicSale):[],openingPurchases:canTransfer(u)?(s.openingPurchases||[]).map(purchase=>({...purchase,keys:undefined})):[],user:u,users:s.users.filter(x=>u.role==='Admin'||x.branchIds.some(b=>u.branchIds.includes(b))),branches:s.branches.filter(b=>u.role==='Admin'||u.branchIds.includes(b.id)),vendors:s.vendors,languages:s.languages,leads:s.leads.filter(l=>canSee(u,l,s.users)).map(l=>({...l,custom:{}})),batches:u.role==='Employee'?[]:s.batches.filter(b=>u.role==='Admin'||(!b.branchId&&canTransfer(u))||u.branchIds.includes(b.branchId)).map(b=>({...b,purchase:canTransfer(u)?b.purchase:undefined,poolAppends:undefined,appendRanges:b.appendRanges??b.poolAppends?.map(a=>({language:a.language,start:a.start,count:a.cells.length})),rows:b.rows.filter(r=>r.state.includes('uplicate')).map(r=>({...r,raw:{}}))})),audit:u.role==='Admin'?s.audit.slice(0,100).map(a=>({...a,old:null,next:null})):[],auditTotal:u.role==='Admin'?(s.auditTotal??s.audit.length):0,operations:canTransfer(u)?s.operations||[]:[],operationsSyncAt:s.operationsSyncAt,importSeries:canTransfer(u)?nextImportSeries(s,'',cachedSourceReceipts()):undefined})}catch(error){const failure=workspaceFailure(error);console.error('Workspace storage unavailable',{name:error instanceof Error?error.name:'Error',code:(error as {code?:string})?.code});return fail(failure.message,failure.status)}}
 const limits=new Map<string,{count:number;at:number}>();
+async function prepareImport(s:Store,u:User,b:Record<string,unknown>){
+ if(u.role!=='Admin'&&u.role!=='Manager')throw new Error('Permission denied');const importBranchId=z.string().max(100).parse(b.branchId||'');const importVendor=z.string().trim().max(100).parse(b.vendor||'');if(importBranchId){if(!s.branches.some(x=>x.id===importBranchId)||!(u.role==='Admin'||u.branchIds.includes(importBranchId)))throw new Error('Branch access denied');}else if(!canTransfer(u))throw new Error('Branch access denied');
+ const raw=z.array(z.record(z.string(),z.string())).max(10000).parse(b.rows);const mapping=z.record(z.string(),z.string()).parse(b.mapping);if(!mapping.name||!mapping.phone)throw new Error('Map name and phone columns');
+ const pools=await loadPools(s),index=existingPhoneIndex(pools.rows,s.leads);
+ const incoming=cachedSourceReceipts();
+ const rows=inspectPoolDuplicates(inspectRows(raw,mapping,(typeof b.language==='string'?b.language:''),s.languages,s.leads),pools.rows,s.leads,index);
+ const poolAppends=planPoolAppends(rows,pools.rows),naming=nextImportSeries(s,z.string().max(180).parse(b.initialFile||''),incoming,z.string().max(240).parse(b.file||''));
+ const previewToken=importPreviewToken(rows,poolAppends,naming,z.string().max(240).parse(b.file||''));
+ return {raw,mapping,rows,poolAppends,naming,previewToken,index,importBranchId,importVendor};
+}
 export async function POST(req:NextRequest){try{
  const origin=req.headers.get('origin');if(origin&&new URL(origin).host!==req.headers.get('host'))return fail('Invalid origin',403);
  const key=req.headers.get('x-forwarded-for')||'local';const rate=limits.get(key);if(rate&&Date.now()-rate.at<60000&&rate.count>90)return fail('Too many requests. Try again shortly.',429);limits.set(key,{at:rate&&Date.now()-rate.at<60000?rate.at:Date.now(),count:rate&&Date.now()-rate.at<60000?rate.count+1:1});
  const b=await req.json();const action=z.string().parse(b.action);
  if(action==='login'){if(process.env.NODE_ENV==='production'||cloudEnabled())return fail('Local profile login is disabled. Sign in with your authorized email and password.',403);const s=await readStore();if(!s.users.some(u=>u.id===b.userId))return fail('Unknown user');await signIn(b.userId);return NextResponse.json({ok:true})}
  if(action==='logout'){(await cookies()).delete('bf-session');return NextResponse.json({ok:true})}
+ if(action==='preview'){
+  const started=performance.now(),s=cloudEnabled()?await readCloudImportStore():await readStore(),u=await session(s);
+  if(!u)throw new Error('Unauthorized');
+  const ready=performance.now();
+  const {rows,previewToken,naming,index,poolAppends}=await prepareImport(s,u,b);
+  return NextResponse.json({rows,previewToken,naming,checkedExisting:index.size,allocations:poolAppends.map(a=>({language:a.language,start:a.start,end:a.start+a.cells.length-1,count:a.cells.length}))},{headers:{'Cache-Control':'private, no-store','Server-Timing':`workspace;dur=${(ready-started).toFixed(1)}, duplicates;dur=${(performance.now()-ready).toFixed(1)}`}});
+ }
  const result=await mutate(async s=>{const u=await session(s);if(!u)throw new Error('Unauthorized');const manager=u.role==='Admin'||u.role==='Manager';
  if(action.startsWith('operations-')){
  if(!canTransfer(u))throw new Error('Permission denied');s.operations??=[];
@@ -40,15 +57,8 @@ export async function POST(req:NextRequest){try{
  throw new Error('Unknown operations action');
  }
  const branch=(id:string)=>{if(!s.branches.some(x=>x.id===id)||!(u.role==='Admin'||u.branchIds.includes(id)))throw new Error('Branch access denied')};
- if(action==='preview'||action==='import'){
- if(!manager)throw new Error('Permission denied');const importBranchId=z.string().max(100).parse(b.branchId||'');const importVendor=z.string().trim().max(100).parse(b.vendor||'');if(importBranchId)branch(importBranchId);else if(!canTransfer(u))throw new Error('Branch access denied');
- const raw=z.array(z.record(z.string(),z.string())).max(10000).parse(b.rows);const mapping=z.record(z.string(),z.string()).parse(b.mapping);if(!mapping.name||!mapping.phone)throw new Error('Map name and phone columns');
- const pools=await loadPools(s),index=existingPhoneIndex(pools.rows,s.leads);
- const incoming=cachedSourceReceipts();
- const rows=inspectPoolDuplicates(inspectRows(raw,mapping,b.language,s.languages,s.leads),pools.rows,s.leads,index);
- const poolAppends=planPoolAppends(rows,pools.rows),naming=nextImportSeries(s,z.string().max(180).parse(b.initialFile||''),incoming,z.string().max(240).parse(b.file||''));
- const previewToken=importPreviewToken(rows,poolAppends,naming,z.string().max(240).parse(b.file||''));
- if(action==='preview')return {rows,previewToken,naming,checkedExisting:index.size,allocations:poolAppends.map(a=>({language:a.language,start:a.start,end:a.start+a.cells.length-1,count:a.cells.length}))};
+ if(action==='import'){
+ const {raw,mapping,rows,poolAppends,naming,previewToken,index,importBranchId,importVendor}=await prepareImport(s,u,b);
  if(!naming.file)throw new Error('Enter the first filename for your series, such as MMS-001.xlsx, and validate again.');
  if(!rows.some(r=>r.state==='Valid'))throw new Error('No new unique leads remain. No leads were added and the series was not advanced.');
  if(b.previewToken!==previewToken)throw new Error('The source leads or next series changed. Validate again to review the latest duplicate counts and ranges.');

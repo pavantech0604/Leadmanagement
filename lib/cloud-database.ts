@@ -1,5 +1,5 @@
 import {assertSaleLedgerChanges} from './lead-finance';
-import {DeploymentError,databaseConnectionUrl} from './deployment';
+import {DeploymentError,databaseConnectionUrl,isTransientDatabaseError} from './deployment';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import fs from 'node:fs';
 import {Pool,type PoolClient,type QueryResultRow} from 'pg';
@@ -16,16 +16,40 @@ export function cloudPool(){
   if(!local&&!url.hostname.endsWith('.supabase.co')&&!url.hostname.endsWith('.pooler.supabase.com'))throw new Error('Unexpected database host.');
   // Strip connection-string SSL switches so they cannot disable verification.
   for(const key of ['sslmode','sslcert','sslkey','sslrootcert'])url.searchParams.delete(key);
-  shared.__cgCloudPool=new Pool({connectionString:url.toString(),max:2,connectionTimeoutMillis:10000,idleTimeoutMillis:30000,statement_timeout:30000,query_timeout:35000,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_CERT?{ca:process.env.SUPABASE_DB_CA_CERT.replace(/\\n/g,'\n')}:process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
+  shared.__cgCloudPool=new Pool({connectionString:url.toString(),max:2,connectionTimeoutMillis:10000,idleTimeoutMillis:30000,statement_timeout:30000,query_timeout:35000,keepAlive:true,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_CERT?{ca:process.env.SUPABASE_DB_CA_CERT.replace(/\\n/g,'\n')}:process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
+  shared.__cgCloudPool.on('error',error=>console.warn('Idle Supabase connection closed',{code:(error as {code?:string}).code}));
  }
  return shared.__cgCloudPool;
 }
 export function cloudQuery<T extends QueryResultRow=QueryResultRow>(sql:string,values:unknown[]=[]){return (shared.__cgCloudTransaction!.getStore()||cloudPool()).query<T>(sql,values)}
 export async function cloudTransaction<T>(fn:()=>Promise<T>){
  if(shared.__cgCloudTransaction!.getStore())return fn();
- const client=await cloudPool().connect();try{await client.query('begin');await client.query("set local lock_timeout = '15s'");const result=await shared.__cgCloudTransaction!.run(client,fn);await client.query('commit');return result}catch(e){await client.query('rollback').catch(()=>{});throw e}finally{client.release()}
+ const client=await cloudPool().connect();
+ let discard=false;
+ try{
+  await client.query('begin');
+  await client.query("set local lock_timeout = '15s'");
+  const result=await shared.__cgCloudTransaction!.run(client,fn);
+  await client.query('commit');
+  return result;
+ }catch(error){
+  discard=isTransientDatabaseError(error)||/query read timeout/i.test(error instanceof Error?error.message:'');
+  if(!discard)try{await client.query('rollback');}catch{discard=true;}
+  throw error;
+ }finally{client.release(discard);}
 }
-export async function readCloudStore(){const {rows}=await cloudQuery('select payload from capital_grow.workspace where id=1');if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');return rows[0].payload as Store}
+export async function readCloudStore(){
+ for(let attempt=0;;attempt++){
+  try{
+   const {rows}=await cloudQuery('select payload from capital_grow.workspace where id=1');
+   if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');
+   return rows[0].payload as Store;
+  }catch(error){
+   if(attempt>0||shared.__cgCloudTransaction!.getStore()||!isTransientDatabaseError(error))throw error;
+   await new Promise(resolve=>setTimeout(resolve,350+Math.random()*250));
+  }
+ }
+}
 const sourceKey='capital-grow-language-pools';
 export async function reserveRecords(s:Store,before:Store){
  assertSaleLedgerChanges(before,s);

@@ -10,10 +10,17 @@ export function useCloudStorage(){
  }
  return false;
 }
+export function isTransientDatabaseError(error:unknown){
+ const e=error as {code?:string;cause?:{code?:string};message?:string};
+ const code=e?.code||e?.cause?.code||'';
+ return ['57P01','57P02','57P03','08000','08001','08003','08006','ECONNRESET','ETIMEDOUT','EAI_AGAIN'].includes(code)
+  ||/connection timeout|timeout exceeded when trying to connect|connection terminated unexpectedly/i.test(e?.message||'');
+}
 export function workspaceFailure(error:unknown){
  if(error instanceof DeploymentError)return {status:503,message:error.message};
  const candidate=error as {code?:string;cause?:{code?:string};message?:string};
  const code=candidate?.code||candidate?.cause?.code;
+ if(['57P01','57P02','57P03'].includes(code||''))return {status:503,message:'Supabase is temporarily refusing database connections. Wait a moment and retry. If this continues, check the project health in Supabase.'};
  if(['ENETUNREACH','EHOSTUNREACH','ENOTFOUND','EAI_AGAIN','ECONNREFUSED','ETIMEDOUT'].includes(code||'')||/connection timeout|timeout exceeded when trying to connect/i.test(candidate?.message||''))return {status:503,message:'The server cannot reach the database. Use the IPv4-compatible Session pooler URI from Supabase Connect (port 5432), check its host, and confirm the project is running and network restrictions allow this deployment.'};
  if(code==='57014'||/query read timeout/i.test(candidate?.message||''))return {status:503,message:'The database took too long to respond. Retry the workspace in a moment.'};
  if(['SELF_SIGNED_CERT_IN_CHAIN','DEPTH_ZERO_SELF_SIGNED_CERT','UNABLE_TO_VERIFY_LEAF_SIGNATURE','CERT_HAS_EXPIRED'].includes(code||''))return {status:503,message:'Database TLS certificate verification failed. Configure the trusted Supabase database CA using the server-only SUPABASE_DB_CA_CERT variable (or SUPABASE_DB_CA_PATH). Keep certificate verification enabled.'};

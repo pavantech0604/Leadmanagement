@@ -2,7 +2,7 @@ import {financeSummary,publicSale,purchaseCost} from '@/lib/lead-finance';
 import {parsePrice} from '@/lib/money';
 import {reconcileGoogleRegisters} from '@/lib/register-reconciliation';
 import {cloudEnabled,readCloudStore,readCloudImportStore} from '@/lib/cloud-database';
-import {workspaceFailure} from '@/lib/deployment';
+import {workspaceFailure,isTransientDatabaseError,DeploymentError} from '@/lib/deployment';
 import {NextRequest,NextResponse,after} from 'next/server';
 import {cookies} from 'next/headers';
 import {z} from 'zod';
@@ -25,6 +25,7 @@ function audit(s:Store,u:User,action:string,old:unknown,next:unknown,lead?:Lead)
 const workspaceJson=(body:unknown)=>NextResponse.json(body,{headers:{'Cache-Control':'private, no-store, max-age=0'}});
 export async function GET(req:NextRequest){try{if((process.env.NODE_ENV==='production'||cloudEnabled())&&!(await cookies()).has('bf-session'))return workspaceJson({login:true,users:[]});const s:Store&{auditTotal?:number}=cloudEnabled()?await readCloudStore(true,req.nextUrl.searchParams.get('overview')!=='1'):await readStore();const u=await session(s);if(!u)return workspaceJson({login:true,users:process.env.NODE_ENV!=='production'&&!cloudEnabled()?s.users.filter(x=>['u0','u1'].includes(x.id)):[]});return workspaceJson({financeSummary:canTransfer(u)?financeSummary(s):undefined,sales:canTransfer(u)?(s.sales||[]).map(publicSale):[],openingPurchases:canTransfer(u)?(s.openingPurchases||[]).map(purchase=>({...purchase,keys:undefined})):[],user:u,users:s.users.filter(x=>u.role==='Admin'||x.branchIds.some(b=>u.branchIds.includes(b))),branches:s.branches.filter(b=>u.role==='Admin'||u.branchIds.includes(b.id)),vendors:s.vendors,languages:s.languages,leads:s.leads.filter(l=>canSee(u,l,s.users)).map(l=>({...l,custom:{}})),batches:u.role==='Employee'?[]:s.batches.filter(b=>u.role==='Admin'||(!b.branchId&&canTransfer(u))||u.branchIds.includes(b.branchId)).map(b=>({...b,purchase:canTransfer(u)?b.purchase:undefined,poolAppends:undefined,appendRanges:b.appendRanges??b.poolAppends?.map(a=>({language:a.language,start:a.start,count:a.cells.length})),rows:b.rows.filter(r=>r.state.includes('uplicate')).map(r=>({...r,raw:{}}))})),audit:u.role==='Admin'?s.audit.slice(0,100).map(a=>({...a,old:null,next:null})):[],auditTotal:u.role==='Admin'?(s.auditTotal??s.audit.length):0,operations:canTransfer(u)?s.operations||[]:[],operationsSyncAt:s.operationsSyncAt,importSeries:canTransfer(u)?nextImportSeries(s,'',cachedSourceReceipts()):undefined})}catch(error){const failure=workspaceFailure(error);console.error('Workspace storage unavailable',{name:error instanceof Error?error.name:'Error',code:(error as {code?:string})?.code});return fail(failure.message,failure.status)}}
 const limits=new Map<string,{count:number;at:number}>();
+class ImportPreviewConflict extends Error{constructor(){super('The lead source or file series changed after your check. Check duplicates again before confirming.');}}
 async function prepareImport(s:Store,u:User,b:Record<string,unknown>){
  if(u.role!=='Admin'&&u.role!=='Manager')throw new Error('Permission denied');const importBranchId=z.string().max(100).parse(b.branchId||'');const importVendor=z.string().trim().max(100).parse(b.vendor||'');if(importBranchId){if(!s.branches.some(x=>x.id===importBranchId)||!(u.role==='Admin'||u.branchIds.includes(importBranchId)))throw new Error('Branch access denied');}else if(!canTransfer(u))throw new Error('Branch access denied');
  const raw=z.array(z.record(z.string(),z.string())).max(10000).parse(b.rows);const mapping=z.record(z.string(),z.string()).parse(b.mapping);if(!mapping.name||!mapping.phone)throw new Error('Map name and phone columns');
@@ -61,7 +62,7 @@ export async function POST(req:NextRequest){try{
  const {raw,mapping,rows,poolAppends,naming,previewToken,index,importBranchId,importVendor}=await prepareImport(s,u,b);
  if(!naming.file)throw new Error('Enter the first filename for your series, such as MMS-001.xlsx, and validate again.');
  if(!rows.some(r=>r.state==='Valid'))throw new Error('No new unique leads remain. No leads were added and the series was not advanced.');
- if(b.previewToken!==previewToken)throw new Error('The source leads or next series changed. Validate again to review the latest duplicate counts and ranges.');
+ if(b.previewToken!==previewToken)throw new ImportPreviewConflict();
  if(typeof b.purchasePrice!=='string'||!b.purchasePrice.trim())throw new Error('Enter the vendor cost per lead before confirming the import.');
  const purchase=purchaseCost(parsePrice(b.purchasePrice),z.enum(['accepted','uploaded']).parse(b.purchaseBasis||'accepted'),rows.filter(r=>r.state==='Valid').length,raw.length);
  const at=new Date().toISOString();const batch={purchase,syncJob:{status:'pending' as const,attempts:0,updatedAt:new Date().toISOString()},poolAppends,sourceFile:z.string().min(1).max(240).parse(b.file),series:naming.series,clientId:naming.clientId,checkedExisting:index.size,id:crypto.randomUUID(),file:naming.file,branchId:importBranchId,vendor:importVendor,at,by:u.name,total:rows.length,valid:rows.filter(r=>r.state==='Valid').length,duplicates:rows.filter(r=>r.state.includes('uplicate')).length,errors:rows.filter(r=>r.state==='Error').length,rows};
@@ -90,7 +91,13 @@ export async function POST(req:NextRequest){try{
   return NextResponse.json({...result,googleConnected:status.connected});
  }
  return NextResponse.json(result);
- }catch(e){const message=e instanceof Error?e.message:'Request failed';return fail(message,message==='Unauthorized'?401:message.includes('denied')?403:400)}}
+ }catch(e){
+  if(e instanceof ImportPreviewConflict)return NextResponse.json({error:e.message,code:'PREVIEW_CHANGED'},{status:409});
+  if(e instanceof DeploymentError||isTransientDatabaseError(e)||/query read timeout|statement timeout/i.test(e instanceof Error?e.message:'')){
+   const failure=workspaceFailure(e);return fail(failure.message,failure.status);
+  }
+  const message=e instanceof Error?e.message:'Request failed';return fail(message,message==='Unauthorized'?401:message.includes('denied')?403:400);
+ }}
 
 
 

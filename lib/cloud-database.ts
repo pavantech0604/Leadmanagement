@@ -160,16 +160,27 @@ async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boole
   const operations=(s.operations??[]).slice(operationCount);
   for(const record of operations)if(record.file.trim())await cloudQuery(
    'insert into capital_grow.file_reservations(normalized_name,operation_id) values(lower(btrim($1)),$2) on conflict do nothing',[record.file,record.id]);
-  await cloudQuery(`with updated as (
-   update capital_grow.workspace set payload=payload||jsonb_build_object(
-    'leads',coalesce(payload->'leads','[]'::jsonb)||$1::jsonb,
-    'batches',$2::jsonb||coalesce(payload->'batches','[]'::jsonb),
-    'operations',coalesce(payload->'operations','[]'::jsonb)||$3::jsonb,
-    'audit',$4::jsonb||coalesce(payload->'audit','[]'::jsonb)),
-    revision=revision+1,updated_at=now() where id=1 returning revision,payload,source_hash
+  // Stream bounded parameter chunks instead of one multi-megabyte pooler message.
+  await cloudQuery('create temporary table cg_import_chunks (part integer primary key, body text not null) on commit drop');
+  const payload=JSON.stringify([s.leads.slice(leadCount),s.batches.slice(0,1),operations,s.audit]);
+  let part=0;
+  for(let start=0;start<payload.length;){
+   let end=Math.min(start+96000,payload.length);
+   if(end<payload.length&&/[\uD800-\uDBFF]/.test(payload[end-1]))end--;
+   await cloudQuery('insert into pg_temp.cg_import_chunks(part,body) values($1,$2)',[part++,payload.slice(start,end)]);
+   start=end;
+  }
+  await cloudQuery(`with staged as (
+    select string_agg(body,'' order by part)::jsonb as delta from pg_temp.cg_import_chunks
+   ), updated as (
+    update capital_grow.workspace set payload=payload||jsonb_build_object(
+     'leads',coalesce(payload->'leads','[]'::jsonb)||(delta->0),
+     'batches',(delta->1)||coalesce(payload->'batches','[]'::jsonb),
+     'operations',coalesce(payload->'operations','[]'::jsonb)||(delta->2),
+     'audit',(delta->3)||coalesce(payload->'audit','[]'::jsonb)),
+     revision=revision+1,updated_at=now() from staged where id=1 returning revision,payload,source_hash
    ) insert into capital_grow.workspace_versions(revision,payload,source_hash)
-   select revision,payload,source_hash from updated`,
-   [JSON.stringify(s.leads.slice(leadCount)),JSON.stringify(s.batches.slice(0,1)),JSON.stringify(operations),JSON.stringify(s.audit)]);
+   select revision,payload,source_hash from updated`);
   phase='commit';
   return result;
  },alternate);}catch(error){

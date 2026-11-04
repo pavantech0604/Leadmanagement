@@ -41,7 +41,7 @@ test('returning sign-in reads only user metadata after verification and skips re
  const calls:string[]=[];
  const loadUsers=async()=>{calls.push('users');return {users:seed().users};};
  await assert.rejects(authenticateCredentials({email:member.email,password:'invalid'},loadUsers,client({badPassword:true})),SignInError);
- assert.deepEqual(calls,[]);
+ assert.equal(calls.length,0);
  const result=await authenticateCredentials({email:member.email,password:'test-only-password'},loadUsers,client(),async sql=>{
   calls.push(sql.startsWith('select')?'membership':'write');
   return {rows:[{...member,auth_user_id:identity.id}]};

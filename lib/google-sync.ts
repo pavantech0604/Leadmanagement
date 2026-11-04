@@ -2,9 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {mutate,readStore} from './store';
-import {cloudQuery} from './cloud-database';
+import {cloudQuery,cloudTransaction} from './cloud-database';
 import {useCloudStorage} from './deployment';
-import type {Batch,GoogleSync} from './types';
+import type {Batch,GoogleSync,Store} from './types';
 import {googleConnectionScript} from './google-script';
 export const googleSpreadsheetId='10Cji9fGZenyi4BLnIodt98z8C1iAPTo3yWCPTaNjpoE';
 type Connection={token:string;url?:string};
@@ -50,13 +50,42 @@ export function verifiedGoogleReceipt(batch:Batch,result:Record<string,unknown>)
 }
 const pendingInOrder=(batches:Batch[])=>batches.filter(b=>!b.googleSync&&b.poolAppends?.length&&b.valid>0)
  .sort((a,b)=>a.at.localeCompare(b.at)||a.id.localeCompare(b.id));
+// Keep the workspace lock and revision history, but transfer only queue metadata.
+async function mutateSync<T>(id:string,change:(state:Pick<Store,'batches'|'operations'|'audit'>)=>T):Promise<T>{
+ if(!useCloudStorage())return mutate(change);
+ return cloudTransaction(async()=>{
+  const locked=await cloudQuery<{batches:Batch[]}>(
+   `select (select coalesce(jsonb_agg(jsonb_build_object(
+     'id',b->'id','at',b->'at','file',b->'file','sourceFile',b->'sourceFile',
+     'valid',b->'valid','syncJob',b->'syncJob','googleSync',b->'googleSync',
+     'poolAppends',case when jsonb_array_length(coalesce(nullif(b->'poolAppends','null'::jsonb),'[]'::jsonb))>0 then '[{}]'::jsonb else '[]'::jsonb end
+    ) order by ord),'[]'::jsonb) from jsonb_array_elements(payload->'batches') with ordinality as items(b,ord)) as batches
+    from capital_grow.workspace where id=1 for update`);
+  const state={batches:locked.rows[0]?.batches??[],audit:[] as Store['audit'],operations:undefined};
+  const index=state.batches.findIndex(b=>b.id===id),before=JSON.stringify(state.batches[index]);
+  const result=change(state);
+  const batch=state.batches[index];
+  if(batch&&JSON.stringify(batch)!==before){
+   const patch=JSON.stringify({syncJob:batch.syncJob,...(batch.googleSync?{googleSync:batch.googleSync}:{})});
+   await cloudQuery(`with updated as (
+    update capital_grow.workspace set payload=jsonb_set(
+     jsonb_set(payload,array['batches',$1],(payload #> array['batches',$1]) || $2::jsonb),
+     '{audit}', $3::jsonb || coalesce(payload->'audit','[]'::jsonb)),
+     revision=revision+1,updated_at=now() where id=1
+    returning revision,payload,source_hash
+   ) insert into capital_grow.workspace_versions(revision,payload,source_hash)
+      select revision,payload,source_hash from updated`,[String(index),patch,JSON.stringify(state.audit)]);
+  }
+  return result;
+ });
+}
 async function nextPendingBatch(){
  if(!useCloudStorage())return pendingInOrder((await readStore()).batches)[0];
  const {rows}=await cloudQuery<{batch:Batch}>(`
   select b - 'rows' as batch
   from capital_grow.workspace w cross join lateral jsonb_array_elements(w.payload->'batches') b
   where w.id=1 and b->>'googleSync' is null and (b->>'valid')::integer>0
-    and jsonb_array_length(coalesce(b->'poolAppends','[]'::jsonb))>0
+    and jsonb_array_length(coalesce(nullif(b->'poolAppends','null'::jsonb),'[]'::jsonb))>0
   order by b->>'at',b->>'id' limit 1
  `);
  return rows[0]?.batch;
@@ -74,7 +103,7 @@ async function syncSelectedBatch(batch:Batch,force:boolean):Promise<GoogleSync>{
  }
  if(batch.googleSync)return batch.googleSync;
  if(!batch.poolAppends?.length||batch.valid<=0)throw Error('This upload has no destination allocations or valid leads.');
- const claimed=await mutate(s=>{
+ const claimed=await mutateSync(batchId,s=>{
   const b=s.batches.find(x=>x.id===batchId);
   if(!b||b.googleSync||pendingInOrder(s.batches)[0]?.id!==batchId)return false;
   if(!force&&b.syncJob?.status==='error'&&Date.now()-Date.parse(b.syncJob.updatedAt)<60_000)return false;
@@ -91,7 +120,7 @@ async function syncSelectedBatch(batch:Batch,force:boolean):Promise<GoogleSync>{
  try{
   const result=await callGoogle(config,{action:'sync',batch:batchSyncPayload(batch)});
   const receipt=verifiedGoogleReceipt(batch,result);
-  await mutate(s=>{
+  await mutateSync(batchId,s=>{
    const b=s.batches.find(x=>x.id===batchId);
    if(!b||b.googleSync)return;
    b.googleSync=receipt;
@@ -105,7 +134,7 @@ async function syncSelectedBatch(batch:Batch,force:boolean):Promise<GoogleSync>{
   });
   return receipt;
  }catch(error){
-  await mutate(s=>{
+  await mutateSync(batchId,s=>{
    const b=s.batches.find(x=>x.id===batchId);
    if(b&&!b.googleSync)b.syncJob={...b.syncJob!,status:'error',updatedAt:new Date().toISOString(),message:error instanceof Error?error.message:'Sync failed. Retry the saved upload.'};
   });

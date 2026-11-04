@@ -76,6 +76,22 @@ export async function readCloudStore(view=false,includeContacts=true){
   }
  }
 }
+// Sync polling only needs authorization and queue metadata.
+export async function readCloudSyncStatus():Promise<Store>{
+ const sql=`select jsonb_build_object(
+  'users',payload->'users','operationsSyncAt',payload->'operationsSyncAt',
+  'batches',coalesce((select jsonb_agg(jsonb_build_object(
+   'id',b->'id','file',b->'file','at',b->'at','valid',b->'valid','syncJob',b->'syncJob','googleSync',b->'googleSync',
+   'appendRanges',case when jsonb_array_length(coalesce(nullif(b->'poolAppends','null'::jsonb),'[]'::jsonb))>0 then '[{}]'::jsonb else '[]'::jsonb end
+  )) from jsonb_array_elements(payload->'batches') b),'[]'::jsonb)
+ ) as payload from capital_grow.workspace where id=1`;
+ const result=await cloudPool().query<{payload:Store}>(sql).catch(error=>{
+  if(!isTransientDatabaseError(error))throw error;
+  return cloudPool(true).query<{payload:Store}>(sql);
+ });
+ if(!result.rows[0])throw new DeploymentError('The cloud workspace has not been initialized.');
+ return result.rows[0].payload;
+}
 // Import validation needs identity columns, not contact history or raw import rows.
 export async function readCloudImportStore():Promise<Store>{
  const {rows}=await cloudQuery<{payload:Store}>(`select jsonb_build_object(

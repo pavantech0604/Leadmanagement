@@ -1,6 +1,6 @@
 import {NextRequest,NextResponse,after} from 'next/server';
 import {refreshMasterInBackground,masterRefreshStatus} from '@/lib/master-cache';
-import {cloudEnabled,readCloudStore,readCloudImportStore} from '@/lib/cloud-database';
+import {cloudEnabled,readCloudSyncStatus,readCloudImportStore} from '@/lib/cloud-database';
 import {readStore} from '@/lib/store';
 import {session} from '@/lib/auth';
 import {canTransfer} from '@/lib/permissions';
@@ -9,7 +9,7 @@ export const runtime='nodejs';
 export const maxDuration=120;
 const statusJson=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'private, no-store'}});
 export async function GET(){try{
- const s=cloudEnabled()?await readCloudStore(true,false):await readStore(),u=await session(s);
+ const s=cloudEnabled()?await readCloudSyncStatus():await readStore(),u=await session(s);
  if(!u||!canTransfer(u))return statusJson({error:'Workspace access required'},403);
  after(()=>refreshMasterInBackground(cloudEnabled()?readCloudImportStore:s));
  const status=await googleConnectionStatus();
@@ -19,7 +19,7 @@ export async function GET(){try{
  }catch{return statusJson({error:'Sync status is temporarily unavailable.'},503);}}
 export async function POST(req:NextRequest){try{
  const origin=req.headers.get('origin');if(origin&&new URL(origin).host!==req.headers.get('host'))throw Error('Invalid origin');
- const s=cloudEnabled()?await readCloudStore(true,false):await readStore(),u=await session(s);if(!u||!canTransfer(u))return NextResponse.json({error:'Workspace access required'},{status:403});
+ const s=cloudEnabled()?await readCloudSyncStatus():await readStore(),u=await session(s);if(!u||!canTransfer(u))return NextResponse.json({error:'Workspace access required'},{status:403});
  const b=await req.json();
  if(b.action==='refresh-register'){after(()=>refreshMasterInBackground(cloudEnabled()?readCloudImportStore:s,true));return statusJson({queued:true});}
  if(b.action==='retry'){if(!(await googleConnectionStatus()).connected)throw Error('Connect Google Sheets before retrying.');after(()=>runGoogleSyncQueue(true));return NextResponse.json({queued:true});}

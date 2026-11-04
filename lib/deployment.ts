@@ -15,6 +15,7 @@ export function workspaceFailure(error:unknown){
  const candidate=error as {code?:string;cause?:{code?:string};message?:string};
  const code=candidate?.code||candidate?.cause?.code;
  if(['ENETUNREACH','EHOSTUNREACH','ENOTFOUND','EAI_AGAIN','ECONNREFUSED','ETIMEDOUT'].includes(code||'')||/connection timeout|timeout exceeded when trying to connect/i.test(candidate?.message||''))return {status:503,message:'The server cannot reach the database. Use the IPv4-compatible Session pooler URI from Supabase Connect (port 5432), check its host, and confirm the project is running and network restrictions allow this deployment.'};
+ if(code==='57014'||/query read timeout/i.test(candidate?.message||''))return {status:503,message:'The database took too long to respond. Retry the workspace in a moment.'};
  if(['SELF_SIGNED_CERT_IN_CHAIN','DEPTH_ZERO_SELF_SIGNED_CERT','UNABLE_TO_VERIFY_LEAF_SIGNATURE','CERT_HAS_EXPIRED'].includes(code||''))return {status:503,message:'Database TLS certificate verification failed. Configure the trusted Supabase database CA using the server-only SUPABASE_DB_CA_CERT variable (or SUPABASE_DB_CA_PATH). Keep certificate verification enabled.'};
  if(code==='53300')return {status:503,message:'The database connection limit is reached. Use the Supabase session pooler and retry after existing connections close.'};
  if(code==='42P01'||code==='3F000')return {status:503,message:'The private Supabase workspace schema is missing. Apply the supplied migrations and initialize the workspace before using this deployment.'};

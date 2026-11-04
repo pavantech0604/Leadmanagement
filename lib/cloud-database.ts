@@ -16,7 +16,7 @@ export function cloudPool(){
   if(!local&&!url.hostname.endsWith('.supabase.co')&&!url.hostname.endsWith('.pooler.supabase.com'))throw new Error('Unexpected database host.');
   // Strip connection-string SSL switches so they cannot disable verification.
   for(const key of ['sslmode','sslcert','sslkey','sslrootcert'])url.searchParams.delete(key);
-  shared.__cgCloudPool=new Pool({connectionString:url.toString(),max:2,connectionTimeoutMillis:10000,idleTimeoutMillis:30000,statement_timeout:30000,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_CERT?{ca:process.env.SUPABASE_DB_CA_CERT.replace(/\\n/g,'\n')}:process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
+  shared.__cgCloudPool=new Pool({connectionString:url.toString(),max:2,connectionTimeoutMillis:10000,idleTimeoutMillis:30000,statement_timeout:30000,query_timeout:35000,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_CERT?{ca:process.env.SUPABASE_DB_CA_CERT.replace(/\\n/g,'\n')}:process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
  }
  return shared.__cgCloudPool;
 }

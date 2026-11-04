@@ -23,3 +23,7 @@ Historical imports retain their original source row references. `mmsoctm06.xlsx`
 ## Google Sheets to app
 
 While the workspace is open, it checks for updates automatically. The background refresh imports new and edited Google register records, including records entered directly in MMS LEAD REPORT. Import History remains the list of files uploaded through the app; Google-only receipts appear in MMS receipts. Automatic refresh preserves missing records. Use the explicit owner reconciliation to apply deletions. Reading the source uses its existing workbook export access; writing requires the separate authenticated Apps Script connection.
+
+## Daily retry when the workspace is closed
+
+Set a separate random server-only `CRON_SECRET` in Vercel Production and redeploy. Vercel sends it as a bearer token to the scheduled sync route. The route rejects requests without it. The daily job is scheduled for 06:00 IST; on Hobby it can start later in that hour. Uploads still start syncing immediately when saved, and opening the workspace still resumes pending uploads.

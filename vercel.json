@@ -2,5 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "node scripts/vercel.mjs install",
-  "buildCommand": "node scripts/vercel.mjs build"
+  "buildCommand": "node scripts/vercel.mjs build",
+  "crons": [
+    {
+      "path": "/api/google-sync/scheduled",
+      "schedule": "30 0 * * *"
+    }
+  ]
 }

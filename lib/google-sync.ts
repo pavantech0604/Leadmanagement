@@ -41,7 +41,7 @@ export function batchSyncPayload(batch:Batch){
  const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(batch.at));
  const dateSerial=Math.round((Date.parse(date+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000);
  const phoneColumns:Record<string,number>={Telugu:3,Tamil:4,Kannada:4,Hindi:6,Malayalam:3};
- return {id:batch.id,file:batch.file,clientId:batch.clientId||'mmsoctm',series:Number(batch.series||'1')||1,dateSerial,count:countToVerify,allocations:batch.poolAppends.map(a=>({language:a.language,start:a.start,cells:a.cells.map(row=>row.map((v,i)=>{if(i!==phoneColumns[a.language])return String(v??'');const digits=String(v??'').replace(/\D/g,'');return digits.length===12&&digits.startsWith('91')?digits.slice(2):digits;}))}))};
+ return {id:batch.id,file:batch.file,clientId:batch.purpose?(batch.clientId||''):(batch.clientId||'mmsoctm'),series:batch.purpose?(Number(batch.series)||0):(Number(batch.series||'1')||1),dateSerial,count:countToVerify,allocations:batch.poolAppends.map(a=>({language:a.language,start:a.start,cells:a.cells.map(row=>row.map((v,i)=>{if(i!==phoneColumns[a.language])return String(v??'');const digits=String(v??'').replace(/\D/g,'');return digits.length===12&&digits.startsWith('91')?digits.slice(2):digits;}))}))};
 }
 export function verifiedGoogleReceipt(batch:Batch,result:Record<string,unknown>):GoogleSync{
  const expected=Object.fromEntries((batch.poolAppends||[]).map(a=>[a.language,`${a.start}-${a.start+a.cells.length-1}`]));
@@ -136,7 +136,7 @@ async function syncSelectedBatch(batch:Batch,force:boolean):Promise<GoogleSync>{
  }catch(error){
   await mutateSync(batchId,s=>{
    const b=s.batches.find(x=>x.id===batchId);
-   if(b&&!b.googleSync)b.syncJob={...b.syncJob!,status:'error',updatedAt:new Date().toISOString(),message:error instanceof Error?error.message:'Sync failed. Retry the saved upload.'};
+   if(b&&!b.googleSync)b.syncJob={...b.syncJob!,status:'error',updatedAt:new Date().toISOString(),message:error instanceof Error?(b.purpose&&error.message==='Invalid upload identity.'?'Update the Google Apps Script deployment to support original vendor filenames.':error.message):'Sync failed. Retry the saved upload.'};
   });
   throw error;
  }

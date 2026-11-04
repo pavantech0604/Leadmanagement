@@ -252,3 +252,5 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 .google-receipt-item svg{color:var(--brand-green);flex-shrink:0}
 .google-receipt-item small{color:var(--muted);margin-inline-start:auto}
 .google-receipt-history>.text-button{margin-top:12px}
+
+.purchase-purpose-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px;margin:12px 0}

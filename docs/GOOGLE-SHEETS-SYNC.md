@@ -27,3 +27,9 @@ While the workspace is open, it checks for updates automatically. The background
 ## Daily retry when the workspace is closed
 
 Set a separate random server-only `CRON_SECRET` in Vercel Production and redeploy. Vercel sends it as a bearer token to the scheduled sync route. The route rejects requests without it. The daily job is scheduled for 06:00 IST; on Hobby it can start later in that hour. Uploads still start syncing immediately when saved, and opening the workspace still resumes pending uploads.
+
+## Original vendor filenames
+
+New imports keep the exact CSV or Excel filename. Number-first names default to Company use, MMS names default to Customer order, and other names start Unclassified. The operator can override the suggestion. Customer company and order reference are saved with the purchase; saving a purchase does not record sales revenue. Accepted unique leads enter the same pipeline regardless of purpose.
+
+Update the existing Apps Script deployment to the current connection script before syncing new uploads. The old deployment only accepted certain XLSX names and required a series number. The new script accepts original CSV and Excel filenames, leaves the series blank where none exists, and uses the batch ID for retry identity. Keep the existing script property token and edit the existing deployment to use the new version so the URL stays the same. Historical Google receipts retain their saved filename and ranges.

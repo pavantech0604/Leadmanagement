@@ -20,7 +20,7 @@ function doPost(e){
   if(p.action!=='sync'||!p.batch||!Array.isArray(p.batch.allocations))throw Error('Invalid sync request.');
   lock=LockService.getScriptLock();if(!lock.tryLock(25000))throw Error('Another delivery is syncing. Retry shortly.');
   var b=p.batch,report=book.getSheetByName('MMS LEAD REPORT');
-  if(!report||!/^[-a-zA-Z0-9_ .]+\\.xlsx$/.test(b.file)||b.file.length>180||typeof b.clientId!=='string'||b.clientId.length>100||!/^[a-f0-9-]{36}$/i.test(b.id)||!Number.isSafeInteger(b.series)||b.series<1||!Number.isSafeInteger(b.dateSerial)||b.dateSerial<1)throw Error('Invalid upload identity.');
+  if(!report||typeof b.file!=='string'||!b.file.trim()||/[<>:"/|?*]/.test(b.file)||b.file.indexOf(String.fromCharCode(92))>=0||b.file.split('').some(function(c){return c.charCodeAt(0)<32;})||!/[.](xlsx|xls|csv)$/i.test(b.file)||b.file.length>180||typeof b.clientId!=='string'||b.clientId.length>100||!/^[a-f0-9-]{36}$/i.test(b.id)||!Number.isSafeInteger(b.series)||b.series<0||!Number.isSafeInteger(b.dateSerial)||b.dateSerial<1)throw Error('Invalid upload identity.');
   var headers=report.getRange(1,1,1,11).getDisplayValues()[0].map(function(x){return x.trim().toUpperCase();});
   if(headers[0]!=='DATE'||headers[3]!=='SERIES NO'||headers[9]!=='TOTAL LEAD'||headers[10]!=='FILE NAME')throw Error('MMS report columns changed. Review the connection.');
   var phones={},pendingPhones={},total=0,plans=[],ranges={},langs={};
@@ -44,11 +44,9 @@ function doPost(e){
   });
   if(total!==b.count||total<1||total>10000)throw Error('Upload total does not match its ranges.');
   var reportRow=0,lastReport=report.getLastRow(),notes=report.getRange(1,1,Math.max(1,lastReport),1).getNotes();
-  var files=report.getRange(1,11,Math.max(1,lastReport),1).getValues();
   notes.forEach(function(row,i){if(row[0]==='Capital Grow import: '+b.id)reportRow=i+1;});
-  files.forEach(function(row,i){if(cgText(row[0]).toLowerCase()===b.file.toLowerCase()&&i+1!==reportRow)throw Error('This report filename already exists.');});
   reportRow=reportRow||lastReport+1;
-  var values=[b.dateSerial,'',b.clientId,b.series,ranges.Telugu||'',ranges.Kannada||'',ranges.Tamil||'',ranges.Malayalam||'',ranges.Hindi||'',total,b.file];
+  var values=[b.dateSerial,'',b.clientId,b.series||'',ranges.Telugu||'',ranges.Kannada||'',ranges.Tamil||'',ranges.Malayalam||'',ranges.Hindi||'',total,b.file];
   if(reportRow<=lastReport){var existing=report.getRange(reportRow,1,1,11).getValues()[0];if(existing[10]!==b.file||Number(existing[3])!==b.series||Number(existing[9])!==total)throw Error('Existing sync receipt differs. Review the report.');}
   plans.forEach(function(plan){
    if(plan.end>plan.sheet.getMaxRows())plan.sheet.insertRowsAfter(plan.sheet.getMaxRows(),plan.end-plan.sheet.getMaxRows());

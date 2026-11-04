@@ -31,4 +31,8 @@ test('deployed script authenticates, verifies writes, resumes retries and refuse
  const replay=send({token,action:'sync',spreadsheetId:id,batch});assert.equal(replay.ok,true);assert.equal(replay.reportRow,2);assert.equal(sheets['MMS LEAD REPORT'].getLastRow(),2);
  const before=JSON.stringify(sheets.TN.rows),conflict=structuredClone(batch);conflict.id=crypto.randomUUID();conflict.file='mmsoctm07.xlsx';conflict.allocations[0].cells[0]=['Changed','','TAMIL NADU','600001','9876543212'];assert.equal(send({token,action:'sync',spreadsheetId:id,batch:conflict}).ok,false);assert.equal(JSON.stringify(sheets.TN.rows),before);
  const duplicate=structuredClone(batch);duplicate.id=crypto.randomUUID();duplicate.file='mmsoctm08.xlsx';duplicate.allocations[0].start=5;duplicate.allocations[0].cells[0][4]='9876543200';assert.equal(send({token,action:'sync',spreadsheetId:id,batch:duplicate}).ok,false);assert.equal(JSON.stringify(sheets.TN.rows),before);
+ const own={...batch,id:crypto.randomUUID(),file:'14102026_Kiran sir.csv',clientId:'',series:0,count:1,allocations:[{language:'Tamil',start:5,cells:[['Vendor lead','','TAMIL NADU','600001','9876543290']]}]};
+ const result=send({token,action:'sync',spreadsheetId:id,batch:own});assert.equal(result.ok,true);assert.equal(sheets['MMS LEAD REPORT'].rows[2][10],own.file);assert.equal(sheets['MMS LEAD REPORT'].rows[2][3],'');
+ assert.equal(send({token,action:'sync',spreadsheetId:id,batch:own}).reportRow,result.reportRow);
+
 });

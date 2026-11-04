@@ -1,3 +1,4 @@
+import {classifyPurchaseFile,purchasePurposeLabel} from '@/lib/purchase-filename';
 import {financeSummary} from './lead-finance';
 import {useCloudStorage} from './deployment';
 import {readCloudSource,cloudQuery} from './cloud-database';
@@ -19,7 +20,7 @@ export async function buildBackupWorkbook(s:Store,sourcePath=process.env.TRANSFE
  for(const item of sheets){const sheet=XLSX.utils.json_to_sheet(item.rows,{header:item.headers});sheet['!cols']=item.headers.map(h=>({wch:Math.min(42,Math.max(16,h.length+4))}));XLSX.utils.book_append_sheet(w,sheet,item.name)}
  const financial=financeSummary(s);
  XLSX.utils.book_append_sheet(w,XLSX.utils.json_to_sheet([{Metric:'Recorded vendor spend',INR:financial.purchaseSpendPaise/100},{Metric:'External sales value',INR:financial.revenuePaise/100},{Metric:'Net lead result',INR:financial.netResultPaise===null?'Costs pending':financial.netResultPaise/100},{Metric:'Margin on sold leads',INR:financial.profitPaise===null?'Costs pending':financial.profitPaise/100},{Metric:'Sold leads with unknown cost',INR:financial.unknownSold}]),'FINANCE SUMMARY');
- const purchases=s.batches.map(batch=>({File:batch.file,Vendor:batch.vendor,'Cost per lead INR':batch.purchase?batch.purchase.unitPricePaise/100:'Not recorded','Billable leads':batch.purchase?.billableQuantity??'','Purchase total INR':batch.purchase?batch.purchase.totalPaise/100:'Not recorded',Basis:batch.purchase?.basis||''}));
+ const purchases=s.batches.map(batch=>({File:batch.sourceFile||batch.file,Purpose:purchasePurposeLabel[batch.purpose||classifyPurchaseFile(batch.sourceFile||batch.file)],Customer:batch.orderCompany||'','Order reference':batch.orderReference||'',Vendor:batch.vendor,'Cost per lead INR':batch.purchase?batch.purchase.unitPricePaise/100:'Not recorded','Billable leads':batch.purchase?.billableQuantity??'','Purchase total INR':batch.purchase?batch.purchase.totalPaise/100:'Not recorded',Basis:batch.purchase?.basis||''}));
  XLSX.utils.book_append_sheet(w,XLSX.utils.json_to_sheet(purchases),'PURCHASE COSTS');
  XLSX.utils.book_append_sheet(w,XLSX.utils.json_to_sheet((s.openingPurchases||[]).map(purchase=>({Reference:purchase.label,Language:purchase.language,From:purchase.start,To:purchase.end,'Cost per lead INR':purchase.unitPricePaise/100,'Total INR':purchase.totalPaise/100,Date:purchase.at}))),'OPENING STOCK COSTS');
  XLSX.utils.book_append_sheet(w,XLSX.utils.json_to_sheet((s.sales||[]).flatMap(sale=>sale.lines.map(line=>({ID:sale.id,Buyer:sale.buyer,File:sale.file,Date:sale.at,Status:sale.status,Language:line.language,From:line.start,To:line.end,Quantity:line.quantity,'Sale price INR':line.unitPricePaise/100,'Sale total INR':line.totalPaise/100})))),'SALES REGISTER');

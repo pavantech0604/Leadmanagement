@@ -29,3 +29,11 @@ test('clean series workbook contains only new valid leads, with source and desti
  const w=XLSX.read(cleanImportWorkbook(batch),{type:'buffer'});assert.equal(w.Sheets.Telugu,undefined);const tamil=XLSX.utils.sheet_to_json<Record<string,unknown>>(w.Sheets.Tamil);assert.equal(tamil.length,1);assert.equal(tamil[0]['Original filename'],'random.csv');assert.equal(tamil[0]['Destination row'],3);assert.equal(tamil[0]['Normalized phone'],'+919876543222');
  const token=importPreviewToken(rows,batch.poolAppends!,nextImportSeries(state()));assert.notEqual(importPreviewToken(rows,batch.poolAppends!,{...nextImportSeries(state()),file:'mmsoctm07.xlsx'}),token);rows[1].state='Duplicate';assert.notEqual(importPreviewToken(rows,batch.poolAppends!,nextImportSeries(state())),token);
 });
+
+import {originalImportName} from '../lib/purchase-filename';
+test('vendor filenames are preserved and classified without assigning a new series',()=>{
+ const own=originalImportName('14102026_Kiran sir.csv');assert.equal(own.file,'14102026_Kiran sir.csv');assert.equal(own.purpose,'company-use');assert.equal(own.series,'');
+ const sale=originalImportName('MMSR104.xlsx');assert.equal(sale.file,'MMSR104.xlsx');assert.equal(sale.purpose,'resale');assert.equal(sale.series,'104');
+ assert.equal(originalImportName('vendor.xlsx').purpose,'unclassified');
+ assert.throws(()=>originalImportName('../vendor.xlsx'));
+});

@@ -240,3 +240,9 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 .upload-sync-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;color:var(--muted);font-size:12px}
 @media(prefers-reduced-motion:no-preference){.upload-sync-pill[data-state=syncing] svg{animation:upload-sync-spin 1.2s linear infinite}}
 @keyframes upload-sync-spin{to{transform:rotate(360deg)}}
+
+.workspace-section-loading{display:flex;align-items:center;gap:12px;min-height:90px;padding:16px;color:var(--text)}
+.workspace-section-loading-icon{flex:0 0 38px;height:38px;display:grid;place-items:center;border-radius:10px;background:var(--soft);color:var(--brand-green)}
+.workspace-section-loading strong{font-size:14px}
+.workspace-section-loading p{font-size:12px;color:var(--muted);margin:4px 0 0;line-height:1.5}
+@media(prefers-reduced-motion:no-preference){.workspace-section-loading-icon svg{animation:upload-sync-spin 1.2s linear infinite}}

@@ -13,7 +13,10 @@ import {BrandLogo} from '@/components/brand-logo';
 
 import {ExportWorkbook} from '@/components/export-workbook';
 import {WorkspaceEntry} from '@/components/workspace-entry';
-const workspaceSectionLoading=()=> <div className="panel workspace-section-loading" role="status">Opening section…</div>;
+const workspaceSectionLoading=()=> <div className="panel workspace-section-loading" role="status">
+ <span className="workspace-section-loading-icon"><Loader2 size={18} aria-hidden/></span>
+ <div><strong>Opening section…</strong><p>Your workspace is ready. This section is loading.</p></div>
+</div>;
 const OperationsDesk=dynamic(()=>import('@/components/operations-desk').then(m=>m.OperationsDesk),{loading:workspaceSectionLoading});
 const LeadCommerce=dynamic(()=>import('@/components/lead-commerce').then(m=>m.LeadCommerce),{loading:workspaceSectionLoading});
 const WorkspaceTrendChart=dynamic(()=>import('@/components/workspace-trend-chart').then(m=>m.WorkspaceTrendChart),{ssr:false});

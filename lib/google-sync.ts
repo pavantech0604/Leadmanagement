@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {mutate,readStore} from './store';
+import {cloudQuery} from './cloud-database';
+import {useCloudStorage} from './deployment';
 import type {Batch,GoogleSync} from './types';
 import {googleConnectionScript} from './google-script';
 export const googleSpreadsheetId='10Cji9fGZenyi4BLnIodt98z8C1iAPTo3yWCPTaNjpoE';
@@ -48,14 +50,28 @@ export function verifiedGoogleReceipt(batch:Batch,result:Record<string,unknown>)
 }
 const pendingInOrder=(batches:Batch[])=>batches.filter(b=>!b.googleSync&&b.poolAppends?.length&&b.valid>0)
  .sort((a,b)=>a.at.localeCompare(b.at)||a.id.localeCompare(b.id));
+async function nextPendingBatch(){
+ if(!useCloudStorage())return pendingInOrder((await readStore()).batches)[0];
+ const {rows}=await cloudQuery<{batch:Batch}>(`
+  select b - 'rows' as batch
+  from capital_grow.workspace w cross join lateral jsonb_array_elements(w.payload->'batches') b
+  where w.id=1 and b->>'googleSync' is null and (b->>'valid')::integer>0
+    and jsonb_array_length(coalesce(b->'poolAppends','[]'::jsonb))>0
+  order by b->>'at',b->>'id' limit 1
+ `);
+ return rows[0]?.batch;
+}
 export async function syncBatch(batchId:string,force=true):Promise<GoogleSync>{
+ const batch=(await readStore()).batches.find(b=>b.id===batchId);
+ if(!batch)throw Error('Upload batch not found.');
+ return syncSelectedBatch(batch,force);
+}
+async function syncSelectedBatch(batch:Batch,force:boolean):Promise<GoogleSync>{
+ const batchId=batch.id;
  const config=await connection();
  if(!config?.url){
   throw Error('Google Sheets webhook URL is not configured. Set GOOGLE_SYNC_URL in .env.local to enable automatic syncing to the live Google Sheet.');
  }
- const current=await readStore();
- const batch=current.batches.find(b=>b.id===batchId);
- if(!batch)throw Error('Upload batch not found.');
  if(batch.googleSync)return batch.googleSync;
  if(!batch.poolAppends?.length||batch.valid<=0)throw Error('This upload has no destination allocations or valid leads.');
  const claimed=await mutate(s=>{
@@ -106,17 +122,16 @@ export async function runGoogleSyncQueue(force=false){
  const work=async()=>{
   const deadline=Date.now()+55_000;
   while(Date.now()<deadline){
-   const current=await readStore();
-   const batch=pendingInOrder(current.batches)[0];
+   const batch=await nextPendingBatch();
    if(!batch)break;
    const age=Date.now()-Date.parse(batch.syncJob?.updatedAt||'');
    if(batch.syncJob?.status==='syncing'&&age<120_000)break;
    if(!force&&batch.syncJob?.status==='error'&&age<60_000)break;
    try{
-    await syncBatch(batch.id,force);
+    await syncSelectedBatch(batch,force);
    }catch{
-    const latest=(await readStore()).batches.find(b=>b.id===batch.id);
-    if(latest?.syncJob?.status==='pending'||!latest?.syncJob)workerState.__cgSyncWorkerError='The server could not start this upload. Retry sync from Import History.';
+    const latest=await nextPendingBatch();
+    if(latest?.id===batch.id&&(latest.syncJob?.status==='pending'||!latest.syncJob))workerState.__cgSyncWorkerError='The server could not start this upload. Retry sync from Import History.';
     break;
    }
   }

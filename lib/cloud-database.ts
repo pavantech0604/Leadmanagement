@@ -103,6 +103,29 @@ export async function mutateCloudStore<T>(fn:(s:Store)=>T|Promise<T>){return clo
  }
  return result;
 })}
+// Confirm against a locked workspace, then persist only the new import records.
+export async function appendCloudImport<T>(fn:(s:Store)=>Promise<T>):Promise<T>{
+ return cloudTransaction(async()=>{
+  await cloudQuery('select id from capital_grow.workspace where id=1 for update');
+  const s=await readCloudImportStore(),leadCount=s.leads.length,operationCount=s.operations?.length??0;
+  s.audit=[];
+  const result=await fn(s);
+  const operations=(s.operations??[]).slice(operationCount);
+  for(const record of operations)if(record.file.trim())await cloudQuery(
+   'insert into capital_grow.file_reservations(normalized_name,operation_id) values(lower(btrim($1)),$2) on conflict do nothing',[record.file,record.id]);
+  await cloudQuery(`with updated as (
+   update capital_grow.workspace set payload=payload||jsonb_build_object(
+    'leads',coalesce(payload->'leads','[]'::jsonb)||$1::jsonb,
+    'batches',$2::jsonb||coalesce(payload->'batches','[]'::jsonb),
+    'operations',coalesce(payload->'operations','[]'::jsonb)||$3::jsonb,
+    'audit',$4::jsonb||coalesce(payload->'audit','[]'::jsonb)),
+    revision=revision+1,updated_at=now() where id=1 returning revision,payload,source_hash
+   ) insert into capital_grow.workspace_versions(revision,payload,source_hash)
+   select revision,payload,source_hash from updated`,
+   [JSON.stringify(s.leads.slice(leadCount)),JSON.stringify(s.batches.slice(0,1)),JSON.stringify(operations),JSON.stringify(s.audit)]);
+  return result;
+ });
+}
 export async function readCloudSource(){const {rows}=await cloudQuery('select s.hash,s.content from capital_grow.source_workbooks s join capital_grow.workspace w on w.source_hash=s.hash where w.id=1');if(!rows[0])throw new Error('The source workbook is not imported.');return {hash:String(rows[0].hash),buffer:rows[0].content as Buffer}}
 export async function saveCloudSource(buffer:Buffer){const hash=createHash('sha256').update(buffer).digest('hex');await cloudQuery('insert into capital_grow.source_workbooks(hash,content) values($1,$2) on conflict do nothing',[hash,buffer]);await cloudQuery('update capital_grow.workspace set source_hash=$1 where id=1',[hash]);return hash}
 export async function securityEvent(actor:string|null,event:string,details:Record<string,unknown>={}){if(cloudEnabled())await cloudQuery('insert into capital_grow.security_events(actor_id,event,details) values($1,$2,$3)',[actor,event,details])}

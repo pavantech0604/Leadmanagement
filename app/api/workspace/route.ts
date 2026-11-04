@@ -1,7 +1,7 @@
 import {financeSummary,publicSale,purchaseCost} from '@/lib/lead-finance';
 import {parsePrice} from '@/lib/money';
 import {reconcileGoogleRegisters} from '@/lib/register-reconciliation';
-import {cloudEnabled,readCloudStore,readCloudImportStore} from '@/lib/cloud-database';
+import {cloudEnabled,readCloudStore,readCloudImportStore,appendCloudImport} from '@/lib/cloud-database';
 import {workspaceFailure,isTransientDatabaseError,DeploymentError} from '@/lib/deployment';
 import {NextRequest,NextResponse,after} from 'next/server';
 import {cookies} from 'next/headers';
@@ -49,7 +49,8 @@ export async function POST(req:NextRequest){try{
   const {rows,previewToken,naming,index,poolAppends}=await prepareImport(s,u,b);
   return NextResponse.json({rows,previewToken,naming,checkedExisting:index.size,allocations:poolAppends.map(a=>({language:a.language,start:a.start,end:a.start+a.cells.length-1,count:a.cells.length}))},{headers:{'Cache-Control':'private, no-store','Server-Timing':`workspace;dur=${(ready-started).toFixed(1)}, duplicates;dur=${(performance.now()-ready).toFixed(1)}`}});
  }
- const result=await mutate(async s=>{const u=await session(s);if(!u)throw new Error('Unauthorized');const manager=u.role==='Admin'||u.role==='Manager';
+ const save=action==='import'&&cloudEnabled()?appendCloudImport:mutate;
+ const result=await save(async s=>{const u=await session(s);if(!u)throw new Error('Unauthorized');const manager=u.role==='Admin'||u.role==='Manager';
  if(action.startsWith('operations-')){
  if(!canTransfer(u))throw new Error('Permission denied');s.operations??=[];
  if(action==='operations-status')return {ok:true};

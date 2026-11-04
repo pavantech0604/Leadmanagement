@@ -68,7 +68,7 @@ export async function readCloudImportStore():Promise<Store>{
  const {rows}=await cloudQuery<{payload:Store}>(`select jsonb_build_object(
   'users',payload->'users','branches',payload->'branches','languages',payload->'languages','operations',payload->'operations',
   'leads',coalesce((select jsonb_agg(jsonb_build_object('id',l->'id','name',l->'name','phone',l->'phone','email',l->'email') order by n) from jsonb_array_elements(payload->'leads') with ordinality as x(l,n)),'[]'::jsonb),
-  'batches',coalesce((select jsonb_agg(jsonb_build_object('id',b->'id','file',b->'file','googleSync',b->'googleSync','poolAppends',b->'poolAppends') order by n) from jsonb_array_elements(payload->'batches') with ordinality as x(b,n)),'[]'::jsonb)
+  'batches',coalesce((select jsonb_agg(jsonb_build_object('id',b->'id','file',b->'file','confirmationToken',b->'confirmationToken','valid',b->'valid','duplicates',b->'duplicates','branchId',b->'branchId','by',b->'by','googleSync',b->'googleSync','poolAppends',b->'poolAppends') order by n) from jsonb_array_elements(payload->'batches') with ordinality as x(b,n)),'[]'::jsonb)
  ) as payload from capital_grow.workspace where id=1`);
  if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized.');
  return rows[0].payload;
@@ -107,9 +107,10 @@ export async function mutateCloudStore<T>(fn:(s:Store)=>T|Promise<T>){return clo
 export async function appendCloudImport<T>(fn:(s:Store)=>Promise<T>):Promise<T>{
  return cloudTransaction(async()=>{
   await cloudQuery('select id from capital_grow.workspace where id=1 for update');
-  const s=await readCloudImportStore(),leadCount=s.leads.length,operationCount=s.operations?.length??0;
+  const s=await readCloudImportStore(),leadCount=s.leads.length,batchCount=s.batches.length,operationCount=s.operations?.length??0;
   s.audit=[];
   const result=await fn(s);
+  if(s.batches.length===batchCount)return result;
   const operations=(s.operations??[]).slice(operationCount);
   for(const record of operations)if(record.file.trim())await cloudQuery(
    'insert into capital_grow.file_reservations(normalized_name,operation_id) values(lower(btrim($1)),$2) on conflict do nothing',[record.file,record.id]);

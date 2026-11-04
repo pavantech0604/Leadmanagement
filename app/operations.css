@@ -246,3 +246,9 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 .workspace-section-loading strong{font-size:14px}
 .workspace-section-loading p{font-size:12px;color:var(--muted);margin:4px 0 0;line-height:1.5}
 @media(prefers-reduced-motion:no-preference){.workspace-section-loading-icon svg{animation:upload-sync-spin 1.2s linear infinite}}
+
+.google-receipt-history .panel-heading{gap:10px;flex-wrap:wrap}
+.google-receipt-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12px;overflow-wrap:anywhere}
+.google-receipt-item svg{color:var(--brand-green);flex-shrink:0}
+.google-receipt-item small{color:var(--muted);margin-inline-start:auto}
+.google-receipt-history>.text-button{margin-top:12px}

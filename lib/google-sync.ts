@@ -94,11 +94,13 @@ export async function syncBatch(batchId:string,force=true):Promise<GoogleSync>{
   throw error;
  }
 }
-const workerState=globalThis as typeof globalThis&{__cgSyncWorker?:Promise<void>};
+const workerState=globalThis as typeof globalThis&{__cgSyncWorker?:Promise<void>;__cgSyncWorkerError?:string};
+export function googleQueueError(){return workerState.__cgSyncWorkerError;}
 export async function runGoogleSyncQueue(force=false){
  if(workerState.__cgSyncWorker)return workerState.__cgSyncWorker;
  const config=await connection();
  if(!config?.url||!config.token||!validConnectionUrl(config.url))return;
+ workerState.__cgSyncWorkerError=undefined;
  const work=async()=>{
   const deadline=Date.now()+55_000;
   while(Date.now()<deadline){
@@ -111,11 +113,13 @@ export async function runGoogleSyncQueue(force=false){
    try{
     await syncBatch(batch.id,force);
    }catch{
+    const latest=(await readStore()).batches.find(b=>b.id===batch.id);
+    if(latest?.syncJob?.status==='pending'||!latest?.syncJob)workerState.__cgSyncWorkerError='The server could not start this upload. Retry sync from Import History.';
     break;
    }
   }
  };
- const promise=work().finally(()=>{workerState.__cgSyncWorker=undefined;});
+ const promise=work().catch(()=>{workerState.__cgSyncWorkerError='The sync queue is temporarily unavailable. Your uploads are saved.';}).finally(()=>{workerState.__cgSyncWorker=undefined;});
  workerState.__cgSyncWorker=promise;
  return promise;
 }

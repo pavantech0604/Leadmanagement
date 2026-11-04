@@ -25,3 +25,13 @@ test('a date correction on a unique file updates the same record instead of dele
  const changed={...dispatch('floor01.xlsx',2),date:'2026-10-02',raw:{...d.raw,DATE:'2026-10-02'}};
  const result=reconcileGoogleRegisters(s,[a,changed]);assert.equal(result.updated,1);assert.equal(result.removed,0);assert.equal(result.added,0);assert.equal(s.operations.find(record=>record.file===d.file)?.id,d.id);
 });
+
+test('automatic refresh adds a Google-only receipt and preserves missing records',()=>{
+ const s=seed(),old=receipt('older-receipt',20),incoming=receipt('MMSR103',21),floor=dispatch('floor01.xlsx',2);
+ s.operations=[old,floor];
+ const result=reconcileGoogleRegisters(s,[incoming,floor],{preserveMissing:true});
+ assert.equal(result.added,1);assert.equal(result.removed,0);
+ assert.ok(s.operations.some(record=>record.id===old.id));
+ assert.ok(s.operations.some(record=>record.file==='MMSR103'));
+ assert.equal(reconcileGoogleRegisters(s,[incoming,floor],{preserveMissing:true}).added,0);
+});

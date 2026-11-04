@@ -6,7 +6,7 @@ import {workspaceFailure} from '@/lib/deployment';
 import {NextRequest,NextResponse,after} from 'next/server';
 import {cookies} from 'next/headers';
 import {z} from 'zod';
-import {runGoogleSyncQueue} from '@/lib/google-sync';
+import {googleConnectionStatus,runGoogleSyncQueue} from '@/lib/google-sync';
 import {refreshMasterInBackground,cachedSourceReceipts} from '@/lib/master-cache';
 import {readStore,mutate} from '@/lib/store';
 import {session,signIn} from '@/lib/auth';
@@ -73,7 +73,13 @@ export async function POST(req:NextRequest){try{
  if(action==='setting'){
  if(u.role!=='Admin')throw new Error('Permission denied');const value=z.string().trim().min(2).max(100).parse(b.value);if(b.kind==='vendor'||b.kind==='language'){const list=b.kind==='vendor'?s.vendors:s.languages;if(list.some(x=>x.toLowerCase()===value.toLowerCase()))throw new Error('Already exists');list.push(value)}else if(b.kind==='branch'){s.branches.push({id:crypto.randomUUID(),name:value,company:z.string().trim().min(1).parse(b.company),code:value.slice(0,3).toUpperCase(),city:z.string().parse(b.city),manager:'Unassigned',active:true})}else throw new Error('Unknown setting');audit(s,u,'Setting created',null,b);return {ok:true};
  }
- throw new Error('Unknown action');});if(action==='import')after(()=>runGoogleSyncQueue());return NextResponse.json(result);
+ throw new Error('Unknown action');});
+ if(action==='import'){
+  const status=await googleConnectionStatus().catch(()=>({connected:false}));
+  if(status.connected)after(()=>runGoogleSyncQueue());
+  return NextResponse.json({...result,googleConnected:status.connected});
+ }
+ return NextResponse.json(result);
  }catch(e){const message=e instanceof Error?e.message:'Request failed';return fail(message,message==='Unauthorized'?401:message.includes('denied')?403:400)}}
 
 

@@ -4,7 +4,7 @@ const sheets=new Set(['UPDATE','MMS LEAD REPORT']);
 const normalized=(value:string)=>value.trim().toLowerCase();
 const contentKey=(record:Operation)=>JSON.stringify([record.kind,Object.entries(record.raw).map(([key,value])=>[key.trim().toUpperCase(),String(value).trim()]).filter(([,value])=>value).sort(([a],[b])=>a.localeCompare(b))]);
 const identityKey=(record:Operation)=>JSON.stringify([record.kind,normalized(record.file),record.date,normalized(record.floor),normalized(record.clientId),record.series.trim()]);
-export function reconcileGoogleRegisters(s:Store,incoming:Operation[]){
+export function reconcileGoogleRegisters(s:Store,incoming:Operation[],{preserveMissing=false}={}){
  if(!incoming.some(record=>record.sourceSheet==='UPDATE')||!incoming.some(record=>record.sourceSheet==='MMS LEAD REPORT'))throw Error('Both Google registers must contain verified rows before reconciliation.');
  if(incoming.some(record=>!sheets.has(record.sourceSheet)))throw Error('Unexpected source register.');
  const protectedIds=new Set((s.transfers||[]).map(transfer=>transfer.operationId));
@@ -29,9 +29,10 @@ export function reconcileGoogleRegisters(s:Store,incoming:Operation[]){
   const after={...record,id:existing.id,createdAt:existing.createdAt,notes:existing.notes,updatedAt:new Date().toISOString()};
   changes.push({before:existing,after});next.push(after);updated++;
  }
- const removed=managed.filter(record=>!used.has(record.id));
+ const missing=managed.filter(record=>!used.has(record.id));
+ const removed=preserveMissing?[]:missing;
  // Google row order remains the entry-order reference used by floor sequences.
- s.operations=[...next,...preserved];s.operationsSyncAt=new Date().toISOString();
+ s.operations=[...next,...(preserveMissing?missing:[]),...preserved];s.operationsSyncAt=new Date().toISOString();
  if(added||updated||removed.length||moved)s.audit.unshift({id:crypto.randomUUID(),at:s.operationsSyncAt,by:'Workspace owner',role:'Admin',action:'Google registers reconciled',old:{removed,changed:changes.map(change=>change.before)},next:{added,updated,removed:removed.length,moved,changed:changes.map(change=>change.after)}});
  return {added,updated,removed:removed.length,moved,total:s.operations.length};
 }

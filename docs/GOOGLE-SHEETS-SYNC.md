@@ -1,25 +1,25 @@
 # Google Sheets upload sync
 
-The existing MARKETING spreadsheet is the fixed destination. An import saves locally first, with a complete JSON restore snapshot. Google writes run after the response, so a slow Google request does not delay saving the upload.
+The existing MARKETING spreadsheet (`10Cji9fGZenyi4BLnIodt98z8C1iAPTo3yWCPTaNjpoE`) is the fixed destination. An import saves with automatic synchronization and a complete restore snapshot.
 
-## One-time owner setup
+## Automatic synchronization
 
-1. Open **Settings → Google Sheets → Connect Google Sheets**.
-2. Click **Copy connection script**.
-3. Open Google Apps Script in the spreadsheet owner's account, create a new project and paste the script.
-4. Choose **Deploy → New deployment → Web app**. Set **Execute as: Me**, **Who has access: Anyone**, then complete Google's authorization.
-5. Paste the deployment URL ending in `/exec` into Settings and choose **Verify & connect**.
-
-The endpoint requires a private key on every request and is restricted to the configured spreadsheet. The key stays in `data/private/google-connection.json`; workbook exports do not include it. The endpoint does not expose a lead-reading or export action. Google deployment instructions: https://developers.google.com/apps-script/guides/web
+- In Vercel, set the server-only `GOOGLE_SYNC_URL` to the authorized Apps Script deployment ending in `/exec` and `GOOGLE_SYNC_TOKEN` to the matching private token, then redeploy. Local development can also use a saved private connection file.
+- An upload is saved first. Background sync writes its allocated language rows and MMS receipt. The import history marks it synced only after a verified receipt.
+- Opening the workspace resumes pending uploads. Uploads are processed oldest first; an earlier failure pauses later ranges. Use **Retry sync** after fixing the error. Do not upload the same file again.
+- Without a configured connection, uploads remain saved and pending. There is no direct Google write fallback.
 
 ## Behavior
 
-- Duplicate validation uses the saved master plus every committed local upload. Google refreshes in the background at most once every five minutes.
+- Duplicate validation uses the saved master plus every committed local upload.
 - Confirmation rechecks duplicates and destination rows against the current local store. A changed preview must be validated again.
-- Google sync rechecks phones against all five live language sheets and refuses to overwrite occupied destination rows.
-- The script locks concurrent writes, checks the batch ID, and verifies the written leads and MMS receipt before the app marks the upload synced.
-- Retries use the same batch ID and allocated rows. A crash after a partial write can resume without adding a second receipt.
-- Pending jobs stay in `workspace.json`. They resume when the app is running and the connection is available. A closed local app does not run background work.
-- Automatic restore snapshots contain the complete JSON data. **Export all data** generates the readable Excel workbook when requested.
+- Sync checks phones against live language sheets and refuses to overwrite occupied destination rows.
+- The sync engine locks concurrent writes, checks the batch ID, and verifies the written leads and MMS receipt before marking the upload synced.
+- Retries use the same batch ID and allocated rows. A crash after a partial write can resume without adding duplicate receipts.
+- Automatic restore snapshots contain complete JSON data. **Export all data** generates the readable Excel workbook when requested.
 
-Historical imports retain their original source row references. `mmsoctm06.xlsx` was directly verified against TN rows 18603–21100 and MMS LEAD REPORT row 22 on 15 October 2026.
+Historical imports retain their original source row references. `mmsoctm06.xlsx` was directly verified against TN rows 18603–21100 and MMS LEAD REPORT row 22.
+
+## Google Sheets to app
+
+While the workspace is open, it checks for updates automatically. The background refresh imports new and edited Google register records, including records entered directly in MMS LEAD REPORT. Import History remains the list of files uploaded through the app; Google-only receipts appear in MMS receipts. Automatic refresh preserves missing records. Use the explicit owner reconciliation to apply deletions. Reading the source uses its existing workbook export access; writing requires the separate authenticated Apps Script connection.

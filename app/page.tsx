@@ -59,7 +59,8 @@ export default function App(){
  const [importSources,setImportSources]=useState<ImportSource[]>([]);
  const [previewLanguage,setPreviewLanguage]=useState('all');
  const importColumns=useMemo(()=>Array.from(new Set(raw.flatMap(r=>Object.keys(r)))),[raw]);
- async function load(){const r=await fetch('/api/workspace',{cache:'no-store'});const d=await r.json().catch(()=>({error:'Unable to load workspace'}));if(!r.ok)throw new Error(d.error||'Unable to load workspace');setData(d)}
+ const needsContacts=(target:string)=>!['Overview','MMS receipts','Floor updates','Daily reports','Sales & costs','Purchase costs','Lead import','Settings','Audit log'].includes(target);
+ async function load(includeContacts=needsContacts(page)){const r=await fetch(includeContacts?'/api/workspace':'/api/workspace?overview=1',{cache:'no-store'});const d=await r.json().catch(()=>({error:'Unable to load workspace'}));if(!r.ok)throw new Error(d.error||'Unable to load workspace');setData(d)}
  useEffect(()=>{
   if(!data?.user||(data.user.role!=='Admin'&&data.user.id!=='u1'))return;
   let active=true,timer:ReturnType<typeof setTimeout>|undefined,previousPending:number|null=null,registerUpdatedAt=data.operationsSyncAt??null;
@@ -97,7 +98,7 @@ export default function App(){
  const total=leads.length;
  const displayLeads=useMemo(()=>page==='Follow-ups'?leads.filter(l=>l.followUp&&!['Converted','Dead','Archived'].includes(l.status)):leads,[leads,page]);
  const manager=data?.user&&['Admin','Manager'].includes(data.user.role);
- function changePage(v:string){setPage(v);setP(1);setSelected([])}
+ function changePage(v:string){setPage(v);setP(1);setSelected([]);if(needsContacts(v)&&!needsContacts(page))void load(true).catch(e=>setToast(e.message));}
  function exportLeads(excel=false){if(!manager)return;download(leads.map(l=>({Name:l.name,Phone:l.phone,Email:l.email,Language:l.language,Company:data?.branches.find(b=>b.id===l.branchId)?.company,Branch:data?.branches.find(b=>b.id===l.branchId)?.name,Vendor:l.vendor,Status:l.status,Employee:data?.users.find(u=>u.id===l.assignedTo)?.name||'Unassigned',Received:l.createdAt,FollowUp:l.followUp})),`capital-grow-leads-${today()}`,excel);setToast(`${leads.length.toLocaleString()} filtered app contacts downloaded`)}
  async function parseFile(f:File){
  importWorker.current?.terminate();importWorker.current=null;setReadingFile(false);

@@ -38,10 +38,23 @@ export async function cloudTransaction<T>(fn:()=>Promise<T>){
   throw error;
  }finally{client.release(discard);}
 }
-export async function readCloudStore(){
+export async function readCloudStore(view=false,includeContacts=true){
+ const sql=view?`select
+  (payload - array['leads','batches','audit','sales','transfers']) || jsonb_build_object(
+   'leads',case when $1::boolean then coalesce((select jsonb_agg(l-'custom' order by n) from jsonb_array_elements(payload->'leads') with ordinality as x(l,n)),'[]'::jsonb) else '[]'::jsonb end,
+   'batches',coalesce((select jsonb_agg((b-array['rows','poolAppends']) || jsonb_build_object(
+    'rows',coalesce((select jsonb_agg(case when r->>'state'='Valid' then jsonb_build_object('state','Valid','phone',r->'phone') else r-'raw' end order by rn)
+     from jsonb_array_elements(b->'rows') with ordinality as q(r,rn) where r->>'state' like '%uplicate%' or (b->'purchase' is not null and r->>'state'='Valid')),'[]'::jsonb),
+    'appendRanges',coalesce((select jsonb_agg(jsonb_build_object('language',a->'language','start',a->'start','count',jsonb_array_length(a->'cells')) order by an)
+     from jsonb_array_elements(nullif(b->'poolAppends','null'::jsonb)) with ordinality as z(a,an)),'[]'::jsonb)
+    ) order by n) from jsonb_array_elements(payload->'batches') with ordinality as x(b,n)),'[]'::jsonb),
+   'audit',coalesce((select jsonb_agg(a-array['old','next'] order by n) from jsonb_array_elements(payload->'audit') with ordinality as x(a,n) where n<=100),'[]'::jsonb),
+   'auditTotal',coalesce(jsonb_array_length(payload->'audit'),0),
+   'sales',coalesce((select jsonb_agg(a-'artifact' order by n) from jsonb_array_elements(nullif(payload->'sales','null'::jsonb)) with ordinality as x(a,n)),'[]'::jsonb)
+  ) as payload from capital_grow.workspace where id=1`:'select payload from capital_grow.workspace where id=1';
  for(let attempt=0;;attempt++){
   try{
-   const {rows}=await cloudQuery('select payload from capital_grow.workspace where id=1');
+   const {rows}=await cloudQuery(sql,view?[includeContacts]:[]);
    if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');
    return rows[0].payload as Store;
   }catch(error){

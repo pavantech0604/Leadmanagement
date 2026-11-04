@@ -14,13 +14,13 @@ export function productionAuthClient(){
  if(key.startsWith('sb_secret_')||legacyRole==='service_role')throw new SignInError('Use the publishable or anon key for sign-in, not a secret service key.',503);
  return createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false},global:{fetch:(url,options)=>fetch(url,{...options,signal:AbortSignal.timeout(15000),cache:'no-store'})}});
 }
-export function memberUser(member:Membership|undefined,authId:string,email:string,s:Store):User|null{
+export function memberUser(member:Membership|undefined,authId:string,email:string,s:Pick<Store,'users'>):User|null{
  if(!member?.active||member.email!==email.toLowerCase()||member.auth_user_id&&member.auth_user_id!==authId)return null;
  const existing=s.users.find(user=>user.id===member.app_user_id);if(!existing)return null;
  return {...existing,name:member.name,email:member.email,role:member.role,branchIds:member.branch_ids};
 }
 type Query=(sql:string,values?:unknown[])=>Promise<{rows:Membership[]}>;
-export async function authenticateCredentials(credentials:Credentials,s:Store,client:SupabaseClient=productionAuthClient(),query:Query=cloudQuery){
+export async function authenticateCredentials(credentials:Credentials,workspace:Pick<Store,'users'>|(()=>Promise<Pick<Store,'users'>>),client:SupabaseClient=productionAuthClient(),query:Query=cloudQuery){
  const email=credentials.email.trim().toLowerCase();
  const {data,error}=await client.auth.signInWithPassword({email,password:credentials.password});
  if(error||!data.session)throw new SignInError('Email or password is incorrect, or the account is not confirmed.');
@@ -37,8 +37,12 @@ export async function authenticateCredentials(credentials:Credentials,s:Store,cl
  }
  const verifiedEmail=identity.email!.toLowerCase();
  if(verifiedEmail!==email)throw new SignInError('This account is not authorized for the workspace.',403);
- const {rows}=await query('select email,auth_user_id,app_user_id,name,role,branch_ids,active from capital_grow.memberships where email=$1 and active=true',[verifiedEmail]);
+ const [{rows},s]=await Promise.all([
+  query('select email,auth_user_id,app_user_id,name,role,branch_ids,active from capital_grow.memberships where email=$1 and active=true',[verifiedEmail]),
+  typeof workspace==='function'?workspace():workspace
+ ]);
  const user=memberUser(rows[0],identity.id,verifiedEmail,s);if(!user)throw new SignInError('This account is not authorized for the workspace.',403);
+ if(rows[0].auth_user_id===identity.id)return {user,authId:identity.id,email:verifiedEmail};
  const binding=await query('update capital_grow.memberships set auth_user_id=$1 where email=$2 and active=true and (auth_user_id is null or auth_user_id=$1) returning email,auth_user_id,app_user_id,name,role,branch_ids,active',[identity.id,verifiedEmail]);
  if(!binding.rows.length)throw new SignInError('This account is not authorized for the workspace.',403);
  return {user,authId:identity.id,email:verifiedEmail};

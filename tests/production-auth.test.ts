@@ -36,3 +36,16 @@ test('authentication setup rejects missing keys and privileged service-role keys
   for(const key of ['sb_secret_example','eyJheader.'+Buffer.from(JSON.stringify({role:'service_role'})).toString('base64url')+'.signature']){process.env.SUPABASE_PUBLISHABLE_KEY=key;assert.throws(productionAuthClient,/not a secret service key/);}
  }finally{for(const key of ['SUPABASE_PUBLISHABLE_KEY','SUPABASE_ANON_KEY','SUPABASE_URL']){if(before[key]===undefined)delete process.env[key];else process.env[key]=before[key]}}
 });
+
+test('returning sign-in reads only user metadata after verification and skips rebinding',async()=>{
+ const calls:string[]=[];
+ const loadUsers=async()=>{calls.push('users');return {users:seed().users};};
+ await assert.rejects(authenticateCredentials({email:member.email,password:'invalid'},loadUsers,client({badPassword:true})),SignInError);
+ assert.deepEqual(calls,[]);
+ const result=await authenticateCredentials({email:member.email,password:'test-only-password'},loadUsers,client(),async sql=>{
+  calls.push(sql.startsWith('select')?'membership':'write');
+  return {rows:[{...member,auth_user_id:identity.id}]};
+ });
+ assert.equal(result.user.id,'u0');
+ assert.deepEqual(calls,['membership','users']);
+});

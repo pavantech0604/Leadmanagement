@@ -1,10 +1,10 @@
-import {NextRequest,NextResponse} from 'next/server';
+import {NextRequest,NextResponse,after} from 'next/server';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
 import {authenticateCredentials,SignInError} from '@/lib/production-auth';
-import {readStore} from '@/lib/store';
+import type {User} from '@/lib/types';
 import {signIn} from '@/lib/auth';
-import {cloudEnabled,rateLimit,securityEvent} from '@/lib/cloud-database';
+import {cloudEnabled,cloudQuery,rateLimit,securityEvent} from '@/lib/cloud-database';
 export const runtime='nodejs';
 export const maxDuration=60;
 const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'no-store'}});
@@ -17,9 +17,13 @@ export async function POST(req:NextRequest){
   const address=(req.headers.get('x-forwarded-for')||'unknown').split(',')[0].trim();
   const fingerprint=createHash('sha256').update(address).digest('hex');
   await rateLimit('signin:'+fingerprint,20,600);
-  const result=await authenticateCredentials(credentials.data,await readStore());
-  await securityEvent(result.authId,'Sign-in succeeded');
-  await signIn(result.user.id,{authId:result.authId,email:result.email});return reply({ok:true});
+  const result=await authenticateCredentials(credentials.data,async()=>{
+   const {rows}=await cloudQuery<{users:User[]}>("select payload->'users' as users from capital_grow.workspace where id=1");
+   return {users:rows[0]?.users??[]};
+  });
+  await signIn(result.user.id,{authId:result.authId,email:result.email});
+  after(()=>securityEvent(result.authId,'Sign-in succeeded').catch(()=>console.error('Sign-in audit could not be written')));
+  return reply({ok:true});
  }catch(error){
   if(error instanceof SignInError)return reply({error:error.message,needsMfa:error.needsMfa},error.status);
   if(error instanceof Error&&error.message.startsWith('Too many requests'))return reply({error:'Too many sign-in attempts. Please wait ten minutes and retry.'},429);

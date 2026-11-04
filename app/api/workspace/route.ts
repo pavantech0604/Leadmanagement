@@ -95,7 +95,7 @@ export async function POST(req:NextRequest){try{
  return NextResponse.json(result);
  }catch(e){
   if(e instanceof ImportPreviewConflict)return NextResponse.json({error:e.message,code:'PREVIEW_CHANGED'},{status:409});
-  if(e instanceof DeploymentError||isTransientDatabaseError(e)||/query read timeout|statement timeout/i.test(e instanceof Error?e.message:'')){
+  if(e instanceof DeploymentError||isTransientDatabaseError(e)||['55P03','57014'].includes((e as {code?:string})?.code||'')||/query read timeout|statement timeout/i.test(e instanceof Error?e.message:'')){
    const failure=workspaceFailure(e);return fail(failure.message,failure.status);
   }
   const message=e instanceof Error?e.message:'Request failed';return fail(message,message==='Unauthorized'?401:message.includes('denied')?403:400);

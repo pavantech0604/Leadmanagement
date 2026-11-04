@@ -24,7 +24,14 @@ export function cloudPool(){
 export function cloudQuery<T extends QueryResultRow=QueryResultRow>(sql:string,values:unknown[]=[]){return (shared.__cgCloudTransaction!.getStore()||cloudPool()).query<T>(sql,values)}
 export async function cloudTransaction<T>(fn:()=>Promise<T>){
  if(shared.__cgCloudTransaction!.getStore())return fn();
- const client=await cloudPool().connect();
+ let client:PoolClient;
+ try{client=await cloudPool().connect();}
+ catch(error){
+  // No transaction has started, so retrying the connection cannot repeat a write.
+  if(!isTransientDatabaseError(error))throw error;
+  await new Promise(resolve=>setTimeout(resolve,350));
+  client=await cloudPool().connect();
+ }
  let discard=false;
  try{
   await client.query('begin');
@@ -105,12 +112,17 @@ export async function mutateCloudStore<T>(fn:(s:Store)=>T|Promise<T>){return clo
 })}
 // Confirm against a locked workspace, then persist only the new import records.
 export async function appendCloudImport<T>(fn:(s:Store)=>Promise<T>):Promise<T>{
- return cloudTransaction(async()=>{
+ let phase='connect';
+ try{return await cloudTransaction(async()=>{
+  phase='workspace lock';
   await cloudQuery('select id from capital_grow.workspace where id=1 for update');
+  phase='validation data';
   const s=await readCloudImportStore(),leadCount=s.leads.length,batchCount=s.batches.length,operationCount=s.operations?.length??0;
   s.audit=[];
+  phase='duplicate and series recheck';
   const result=await fn(s);
   if(s.batches.length===batchCount)return result;
+  phase='save and version';
   const operations=(s.operations??[]).slice(operationCount);
   for(const record of operations)if(record.file.trim())await cloudQuery(
    'insert into capital_grow.file_reservations(normalized_name,operation_id) values(lower(btrim($1)),$2) on conflict do nothing',[record.file,record.id]);
@@ -124,8 +136,12 @@ export async function appendCloudImport<T>(fn:(s:Store)=>Promise<T>):Promise<T>{
    ) insert into capital_grow.workspace_versions(revision,payload,source_hash)
    select revision,payload,source_hash from updated`,
    [JSON.stringify(s.leads.slice(leadCount)),JSON.stringify(s.batches.slice(0,1)),JSON.stringify(operations),JSON.stringify(s.audit)]);
+  phase='commit';
   return result;
- });
+ });}catch(error){
+  if(isTransientDatabaseError(error)||(error as {code?:string})?.code||/timeout/i.test(error instanceof Error?error.message:''))console.warn('Import database operation interrupted',{phase,code:(error as {code?:string})?.code});
+  throw error;
+ }
 }
 export async function readCloudSource(){const {rows}=await cloudQuery('select s.hash,s.content from capital_grow.source_workbooks s join capital_grow.workspace w on w.source_hash=s.hash where w.id=1');if(!rows[0])throw new Error('The source workbook is not imported.');return {hash:String(rows[0].hash),buffer:rows[0].content as Buffer}}
 export async function saveCloudSource(buffer:Buffer){const hash=createHash('sha256').update(buffer).digest('hex');await cloudQuery('insert into capital_grow.source_workbooks(hash,content) values($1,$2) on conflict do nothing',[hash,buffer]);await cloudQuery('update capital_grow.workspace set source_hash=$1 where id=1',[hash]);return hash}

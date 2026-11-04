@@ -28,17 +28,20 @@ export function cloudPool(alternate=false){
  return shared[key];
 }
 export function cloudQuery<T extends QueryResultRow=QueryResultRow>(sql:string,values:unknown[]=[]){return (shared.__cgCloudTransaction!.getStore()||cloudPool()).query<T>(sql,values)}
-export async function cloudTransaction<T>(fn:()=>Promise<T>){
+export async function cloudTransaction<T>(fn:()=>Promise<T>,alternate=false){
  if(shared.__cgCloudTransaction!.getStore())return fn();
  let client:PoolClient;
- try{client=await cloudPool().connect();}
+ try{client=await cloudPool(alternate).connect();}
  catch(error){
   // No transaction has started, so retrying the connection cannot repeat a write.
   if(!isTransientDatabaseError(error))throw error;
   await new Promise(resolve=>setTimeout(resolve,350));
-  client=await cloudPool(true).connect();
+  client=await cloudPool(!alternate).connect();
  }
  let discard=false;
+ const onDisconnect=()=>{discard=true;};
+ // A checked-out pg client emits its own error on socket loss.
+ client.on('error',onDisconnect);
  try{
   await client.query('begin');
   await client.query("set local lock_timeout = '15s'");
@@ -46,10 +49,10 @@ export async function cloudTransaction<T>(fn:()=>Promise<T>){
   await client.query('commit');
   return result;
  }catch(error){
-  discard=isTransientDatabaseError(error)||/query read timeout/i.test(error instanceof Error?error.message:'');
+  discard=discard||isTransientDatabaseError(error)||/query read timeout/i.test(error instanceof Error?error.message:'');
   if(!discard)try{await client.query('rollback');}catch{discard=true;}
   throw error;
- }finally{client.release(discard);}
+ }finally{client.release(discard);client.removeListener('error',onDisconnect);}
 }
 export async function readCloudStore(view=false,includeContacts=true){
  const sql=view?`select
@@ -133,7 +136,16 @@ export async function mutateCloudStore<T>(fn:(s:Store)=>T|Promise<T>){return clo
  return result;
 })}
 // Confirm against a locked workspace, then persist only the new import records.
-export async function appendCloudImport<T>(fn:(s:Store)=>Promise<T>):Promise<T>{
+export async function appendCloudImport<T>(fn:(s:Store)=>Promise<T>,canRecover=false):Promise<T>{
+ try{return await appendCloudImportOnce(fn,false);}
+ catch(error){
+  const code=(error as {code?:string})?.code;
+  if(!canRecover||(!isTransientDatabaseError(error)&&!['55P03','40001','40P01'].includes(code||'')&&!/query read timeout/i.test(error instanceof Error?error.message:'')))throw error;
+  // The same confirmation token is checked under the lock on either pooler.
+  return appendCloudImportOnce(fn,true);
+ }
+}
+async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boolean):Promise<T>{
  let phase='connect';
  try{return await cloudTransaction(async()=>{
   phase='workspace lock';
@@ -160,8 +172,8 @@ export async function appendCloudImport<T>(fn:(s:Store)=>Promise<T>):Promise<T>{
    [JSON.stringify(s.leads.slice(leadCount)),JSON.stringify(s.batches.slice(0,1)),JSON.stringify(operations),JSON.stringify(s.audit)]);
   phase='commit';
   return result;
- });}catch(error){
-  if(isTransientDatabaseError(error)||(error as {code?:string})?.code||/timeout/i.test(error instanceof Error?error.message:''))console.warn('Import database operation interrupted',{phase,code:(error as {code?:string})?.code});
+ },alternate);}catch(error){
+  if(isTransientDatabaseError(error)||(error as {code?:string})?.code||/timeout/i.test(error instanceof Error?error.message:''))console.warn(`Import database operation interrupted: ${phase} (${(error as {code?:string})?.code||error instanceof Error&&error.name||'unknown'})`);
   throw error;
  }
 }

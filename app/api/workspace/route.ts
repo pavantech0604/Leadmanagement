@@ -48,7 +48,7 @@ export async function POST(req:NextRequest){try{
   const {rows,previewToken,naming,index,poolAppends}=await prepareImport(s,u,b);
   return NextResponse.json({rows,previewToken,naming,checkedExisting:index.size,allocations:poolAppends.map(a=>({language:a.language,start:a.start,end:a.start+a.cells.length-1,count:a.cells.length}))},{headers:{'Cache-Control':'private, no-store','Server-Timing':`workspace;dur=${(ready-started).toFixed(1)}, duplicates;dur=${(performance.now()-ready).toFixed(1)}`}});
  }
- const save=action==='import'&&cloudEnabled()?appendCloudImport:mutate;
+ const save=action==='import'&&cloudEnabled()?<T>(fn:(s:Store)=>Promise<T>)=>appendCloudImport(fn,typeof b.previewToken==='string'&&/^[a-f0-9]{64}$/.test(b.previewToken)):mutate;
  const result=await save(async s=>{const u=await session(s);if(!u)throw new Error('Unauthorized');const manager=u.role==='Admin'||u.role==='Manager';
  if(action.startsWith('operations-')){
  if(!canTransfer(u))throw new Error('Permission denied');s.operations??=[];

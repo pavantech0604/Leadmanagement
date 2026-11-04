@@ -6,17 +6,19 @@ import type {Batch,GoogleSync} from './types';
 import {googleConnectionScript} from './google-script';
 export const googleSpreadsheetId='10Cji9fGZenyi4BLnIodt98z8C1iAPTo3yWCPTaNjpoE';
 type Connection={token:string;url?:string};
+const cleanSetting=(value?:string)=>value?.trim().replace(/^(["'])(.*)\1$/,'$2').trim()||'';
 const connectionFile=()=>process.env.GOOGLE_SYNC_CONNECTION_FILE||path.join(process.cwd(),'data','private','google-connection.json');
 async function connection():Promise<Connection|null>{
  if(process.env.GOOGLE_SYNC_URL){
-  return {url:process.env.GOOGLE_SYNC_URL,token:(process.env.GOOGLE_SYNC_TOKEN?.trim()||process.env.Google_sync_token?.trim()||'')};
+  return {url:cleanSetting(process.env.GOOGLE_SYNC_URL),token:cleanSetting(process.env.GOOGLE_SYNC_TOKEN)||cleanSetting(process.env.Google_sync_token)};
  }
  try{return JSON.parse(await fs.readFile(connectionFile(),'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}
 }
 async function saveConnection(config:Connection){const file=connectionFile();await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file+'.tmp',JSON.stringify(config),{mode:0o600});await fs.rename(file+'.tmp',file);}
 export async function googleConnectionStatus(){
  const config=await connection();
- return {connected:!!(config?.url&&validConnectionUrl(config.url)&&config.token),spreadsheetId:googleSpreadsheetId};
+ const configurationIssue=!config?.url?'GOOGLE_SYNC_URL is missing from this deployment.':!validConnectionUrl(config.url)?'GOOGLE_SYNC_URL must be the Google Apps Script web app URL ending in /exec.':!config.token?'GOOGLE_SYNC_TOKEN is missing from this deployment.':undefined;
+ return {connected:!configurationIssue,configurationIssue,spreadsheetId:googleSpreadsheetId};
 }
 export async function prepareGoogleConnection(){let config=await connection();if(!config){config={token:randomBytes(32).toString('hex')};await saveConnection(config);}return googleConnectionScript(config.token);}
 export function validConnectionUrl(value:string){try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='script.google.com'&&!u.username&&!u.password&&!u.port&&!u.search&&!u.hash&&/^\/macros\/s\/[a-zA-Z0-9_-]{16,}\/exec$/.test(u.pathname);}catch{return false;}}

@@ -36,7 +36,7 @@ export default function App(){
  let uploadUnitPrice:number|null=null;try{uploadUnitPrice=parsePrice(purchasePrice)}catch{/* Leave incomplete currency input editable. */}
  const [importPlan,setImportPlan]=useState<{naming:ImportSeries;checkedExisting:number;previewToken:string}|null>(null);
  const [allocations,setAllocations]=useState<{language:string;start:number;end:number;count:number}[]>([]);
- const [googleStatus,setGoogleStatus]=useState<{connected:boolean;pending:number;registerError?:string;queueError?:string;jobs:{id:string;file:string;status?:string;message?:string}[]}|null>(null);
+ const [googleStatus,setGoogleStatus]=useState<{connected:boolean;pending:number;configurationIssue?:string;registerError?:string;queueError?:string;jobs:{id:string;file:string;status?:string;message?:string}[]}|null>(null);
 
 
  const [syncStatusUnavailable,setSyncStatusUnavailable]=useState(false);
@@ -72,7 +72,7 @@ export default function App(){
   if(!b.appendRanges?.length)return {state:'local',label:'Saved',detail:b.valid?'No Google rows assigned':'No new leads to sync'};
   const job=googleStatus?.jobs.find(j=>j.id===b.id)??b.syncJob;
   if(syncStatusUnavailable)return {state:'pending',label:'Pending',detail:'Saved. Sync status is temporarily unavailable.'};
-  if(googleStatus?.connected===false)return {state:'error',label:'Needs attention',detail:'Saved. The server connection is unavailable.'};
+  if(googleStatus?.connected===false)return {state:'error',label:'Needs attention',detail:googleStatus.configurationIssue||'Saved. The server connection is unavailable.'};
   if(googleStatus?.queueError)return {state:'error',label:'Needs attention',detail:googleStatus.queueError};
   const oldest=googleStatus?.jobs[0];
   if(oldest?.status==='error'&&oldest.id!==b.id)return {state:'pending',label:'Pending',detail:`Waiting for ${oldest.file} to sync first.`};

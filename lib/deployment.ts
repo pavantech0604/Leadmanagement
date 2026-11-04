@@ -13,7 +13,7 @@ export function useCloudStorage(){
 export function isTransientDatabaseError(error:unknown){
  const e=error as {code?:string;cause?:{code?:string};message?:string};
  const code=e?.code||e?.cause?.code||'';
- return ['57P01','57P02','57P03','08000','08001','08003','08006','ECONNRESET','ETIMEDOUT','EAI_AGAIN'].includes(code)
+ return ['57P01','57P02','57P03','08000','08001','08003','08006','ECONNRESET','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','ETIMEDOUT','EAI_AGAIN'].includes(code)
   ||/connection timeout|timeout exceeded when trying to connect|connection terminated unexpectedly/i.test(e?.message||'');
 }
 export function workspaceFailure(error:unknown){

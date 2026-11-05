@@ -1,3 +1,4 @@
+import {archiveBatchRows,restoreBatchRows} from './import-compression';
 import {assertSaleLedgerChanges} from './lead-finance';
 import {DeploymentError,databaseConnectionUrl,isTransientDatabaseError} from './deployment';
 import {AsyncLocalStorage} from 'node:async_hooks';
@@ -64,7 +65,7 @@ export async function readCloudStore(view=false,includeContacts=true){
  const sql=view?`select
   (payload - array['leads','batches','audit','sales','transfers']) || jsonb_build_object(
    'leads',case when $1::boolean then coalesce((select jsonb_agg(l-'custom' order by n) from jsonb_array_elements(payload->'leads') with ordinality as x(l,n)),'[]'::jsonb) else '[]'::jsonb end,
-   'batches',coalesce((select jsonb_agg((b-array['rows','poolAppends']) || jsonb_build_object(
+   'batches',coalesce((select jsonb_agg((b-array['rows','poolAppends','rawArchive']) || jsonb_build_object(
     'rows',coalesce((select jsonb_agg(case when r->>'state'='Valid' then jsonb_build_object('state','Valid','phone',r->'phone') else r-'raw' end order by rn)
      from jsonb_array_elements(b->'rows') with ordinality as q(r,rn) where r->>'state' like '%uplicate%' or (b->'purchase' is not null and r->>'state'='Valid')),'[]'::jsonb),
     'appendRanges',coalesce((select jsonb_agg(jsonb_build_object('language',a->'language','start',a->'start','count',jsonb_array_length(a->'cells')) order by an)
@@ -78,7 +79,7 @@ export async function readCloudStore(view=false,includeContacts=true){
   try{
    const {rows}=await (attempt===0?cloudQuery(sql,view?[includeContacts]:[]):cloudPool(true).query(sql,view?[includeContacts]:[]));
    if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');
-   return rows[0].payload as Store;
+   return view?rows[0].payload as Store:await restoreBatchRows(rows[0].payload as Store);
   }catch(error){
    if(attempt>0||shared.__cgCloudTransaction!.getStore()||(!isTransientDatabaseError(error)&&!(view&&/query read timeout/i.test(error instanceof Error?error.message:''))))throw error;
    await new Promise(resolve=>setTimeout(resolve,350+Math.random()*250));
@@ -172,7 +173,9 @@ async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boole
   // Raw source cells already exist in the batch. Reattach them in Postgres.
   const compact=incoming.length===validRows.length&&incoming.every((lead,i)=>lead.custom===validRows[i].raw);
   const leads=compact?incoming.map(({custom,...lead})=>{void custom;return lead;}):incoming;
-  const payload=JSON.stringify([leads,[batch],operations,s.audit,compact]);
+  const archived=await archiveBatchRows(batch);
+  // If raw cells are archived, keep lead custom cells intact for normal lead access.
+  const payload=JSON.stringify([archived.rawArchive?incoming:leads,[archived],operations,s.audit,compact&&!archived.rawArchive]);
   const needsStaging=Buffer.byteLength(payload)>96000;
   if(needsStaging){
    phase='prepare import staging';

@@ -1,5 +1,6 @@
 'use client';
 import {classifyPurchaseFile,purchasePurposeLabel,type PurchasePurpose} from '@/lib/purchase-filename';
+import {encodeImportRequest} from '@/lib/import-request';
 import {canTransfer} from '@/lib/permissions';
 import {money,parsePrice} from '@/lib/money';
 import type {FinanceSummary} from '@/lib/lead-finance';
@@ -45,7 +46,8 @@ export default function App(){
    // Allow the browser to paint feedback before serializing a large upload.
    await new Promise<void>(resolve=>setTimeout(resolve,32));
    if(controller.signal.aborted)return;
-   const response=await fetch('/api/workspace',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({action:'preview',rows:raw,mapping,file})});
+   const encoded=await encodeImportRequest({action:'preview',rows:raw,mapping,file});
+   const response=await fetch('/api/workspace',{method:'POST',...encoded,signal:controller.signal});
    const result=await response.json();
    if(duplicateRequest.current!==controller||controller.signal.aborted)return;
    if(!response.ok)throw Error(result.error||'Duplicate check failed. Please retry.');
@@ -125,7 +127,7 @@ export default function App(){
  useEffect(()=>{const t=setTimeout(()=>{setQuery(search);setP(1)},250);return()=>clearTimeout(t)},[search]);
  useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light'},[dark]);
  useEffect(()=>{if(toast){const t=setTimeout(()=>setToast(''),4500);return()=>clearTimeout(t)}},[toast]);
- async function api(body:unknown,refresh=true,quiet=false){setBusy(true);try{const r=await fetch('/api/workspace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw Object.assign(new Error(result.error||'Request failed'),{code:result.code});if(refresh){try{await load()}catch{setToast('Saved. Workspace refresh is temporarily unavailable.')}}return result}catch(e){if(!quiet)setToast(`Error: ${(e as Error).message}`);throw e}finally{setBusy(false)}}
+ async function api(body:unknown,refresh=true,quiet=false){setBusy(true);try{const encoded=await encodeImportRequest(body);const r=await fetch('/api/workspace',{method:'POST',...encoded});const result=await r.json();if(!r.ok)throw Object.assign(new Error(result.error||'Request failed'),{code:result.code});if(refresh){try{await load()}catch{setToast('Saved. Workspace refresh is temporarily unavailable.')}}return result}catch(e){if(!quiet)setToast(`Error: ${(e as Error).message}`);throw e}finally{setBusy(false)}}
  const leads=useMemo(()=>{const cutoff=Date.now()-Number(period)*86400000;return (data?.leads||[]).filter(l=>(branch==='all'||l.branchId===branch)&&(language==='all'||l.language===language)&&(status==='all'||l.status===status)&&(vendor==='all'||l.vendor===vendor)&&(period==='all'||new Date(l.createdAt).getTime()>=cutoff)&&(!query||`${l.name} ${l.phone} ${l.email}`.toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>sort?a.name.localeCompare(b.name):b.createdAt.localeCompare(a.createdAt))},[data,branch,language,status,vendor,period,query,sort]);
  const calendarDay=today();
  const {converted,receivedToday,due,overdue,trend}=useMemo(()=>summarizeLeads(leads),[leads,calendarDay]);

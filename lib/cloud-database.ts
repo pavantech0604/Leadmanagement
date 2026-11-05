@@ -156,31 +156,52 @@ async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boole
   phase='duplicate and series recheck';
   const result=await fn(s);
   if(s.batches.length===batchCount)return result;
-  phase='save and version';
+  phase='reserve filename';
   const operations=(s.operations??[]).slice(operationCount);
   for(const record of operations)if(record.file.trim())await cloudQuery(
    'insert into capital_grow.file_reservations(normalized_name,operation_id) values(lower(btrim($1)),$2) on conflict do nothing',[record.file,record.id]);
   // Stream bounded parameter chunks instead of one multi-megabyte pooler message.
-  await cloudQuery('create temporary table cg_import_chunks (part integer primary key, body text not null) on commit drop');
-  const payload=JSON.stringify([s.leads.slice(leadCount),s.batches.slice(0,1),operations,s.audit]);
-  let part=0;
-  for(let start=0;start<payload.length;){
-   let end=Math.min(start+96000,payload.length);
-   if(end<payload.length&&/[\uD800-\uDBFF]/.test(payload[end-1]))end--;
-   await cloudQuery('insert into pg_temp.cg_import_chunks(part,body) values($1,$2)',[part++,payload.slice(start,end)]);
-   start=end;
+  const incoming=s.leads.slice(leadCount),batch=s.batches[0];
+  const validRows=batch.rows.filter(row=>row.state==='Valid');
+  // Raw source cells already exist in the batch. Reattach them in Postgres.
+  const compact=incoming.length===validRows.length&&incoming.every((lead,i)=>lead.custom===validRows[i].raw);
+  const leads=compact?incoming.map(({custom,...lead})=>{void custom;return lead;}):incoming;
+  const payload=JSON.stringify([leads,[batch],operations,s.audit,compact]);
+  const needsStaging=Buffer.byteLength(payload)>96000;
+  if(needsStaging){
+   phase='prepare import staging';
+   await cloudQuery('create temporary table cg_import_chunks (part integer primary key, body text not null) on commit drop');
+   phase='transfer import rows';
+   let part=0;
+   for(let start=0;start<payload.length;){
+    let end=Math.min(start+96000,payload.length);
+    if(end<payload.length&&/[\uD800-\uDBFF]/.test(payload[end-1]))end--;
+    await cloudQuery('insert into pg_temp.cg_import_chunks(part,body) values($1,$2)',[part++,payload.slice(start,end)]);
+    start=end;
+   }
   }
+  phase='apply import';
+  const deltaSource=needsStaging?"select string_agg(body,'' order by part)::jsonb as delta from pg_temp.cg_import_chunks":'select $1::jsonb as delta';
   await cloudQuery(`with staged as (
-    select string_agg(body,'' order by part)::jsonb as delta from pg_temp.cg_import_chunks
-   ), updated as (
+    ${deltaSource}
+   ), restored as (
+    select delta,case when (delta->>4)::boolean then coalesce((
+     select jsonb_agg(lead||jsonb_build_object('custom',raw) order by ord)
+     from jsonb_array_elements(delta->0) with ordinality as l(lead,ord)
+     join (select item->'raw' as raw,row_number() over(order by n) as rn
+      from jsonb_array_elements(delta#>'{1,0,rows}') with ordinality as r(item,n)
+      where item->>'state'='Valid') r on rn=ord
+    ),'[]'::jsonb) else delta->0 end as leads from staged
+   )
     update capital_grow.workspace set payload=payload||jsonb_build_object(
-     'leads',coalesce(payload->'leads','[]'::jsonb)||(delta->0),
+     'leads',coalesce(payload->'leads','[]'::jsonb)||leads,
      'batches',(delta->1)||coalesce(payload->'batches','[]'::jsonb),
      'operations',coalesce(payload->'operations','[]'::jsonb)||(delta->2),
      'audit',(delta->3)||coalesce(payload->'audit','[]'::jsonb)),
-     revision=revision+1,updated_at=now() from staged where id=1 returning revision,payload,source_hash
-   ) insert into capital_grow.workspace_versions(revision,payload,source_hash)
-   select revision,payload,source_hash from updated`);
+     revision=revision+1,updated_at=now() from restored where id=1`,needsStaging?[]:[payload]);
+  phase='save import version';
+  await cloudQuery(`insert into capital_grow.workspace_versions(revision,payload,source_hash)
+   select revision,payload,source_hash from capital_grow.workspace where id=1`);
   phase='commit';
   return result;
  },alternate);}catch(error){

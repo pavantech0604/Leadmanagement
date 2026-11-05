@@ -54,19 +54,27 @@ const pendingInOrder=(batches:Batch[])=>batches.filter(b=>!b.googleSync&&b.poolA
 async function mutateSync<T>(id:string,change:(state:Pick<Store,'batches'|'operations'|'audit'>)=>T):Promise<T>{
  if(!useCloudStorage())return mutate(change);
  return cloudTransaction(async()=>{
+  await cloudQuery('select id from capital_grow.workspace where id=1 for update');
   const locked=await cloudQuery<{batches:Batch[]}>(
-   `select (select coalesce(jsonb_agg(jsonb_build_object(
+   `with source as materialized (select payload from capital_grow.workspace_read where id=1) select (select coalesce(jsonb_agg(jsonb_build_object(
      'id',b->'id','at',b->'at','file',b->'file','sourceFile',b->'sourceFile',
      'valid',b->'valid','syncJob',b->'syncJob','googleSync',b->'googleSync',
      'poolAppends',case when jsonb_array_length(coalesce(nullif(b->'poolAppends','null'::jsonb),'[]'::jsonb))>0 then '[{}]'::jsonb else '[]'::jsonb end
     ) order by ord),'[]'::jsonb) from jsonb_array_elements(payload->'batches') with ordinality as items(b,ord)) as batches
-    from capital_grow.workspace where id=1 for update`);
+    from source`);
   const state={batches:locked.rows[0]?.batches??[],audit:[] as Store['audit'],operations:undefined};
   const index=state.batches.findIndex(b=>b.id===id),before=JSON.stringify(state.batches[index]);
   const result=change(state);
   const batch=state.batches[index];
   if(batch&&JSON.stringify(batch)!==before){
    const patch=JSON.stringify({syncJob:batch.syncJob,...(batch.googleSync?{googleSync:batch.googleSync}:{})});
+   const ledger=await cloudQuery('select id from capital_grow.pipeline_imports where id=$1 and not absorbed',[id]);
+   if(ledger.rows.length){
+    await cloudQuery('update capital_grow.pipeline_imports set batch=batch||$2::jsonb,audit=$3::jsonb||audit where id=$1 and not absorbed',[id,patch,JSON.stringify(state.audit)]);
+    return result;
+   }
+   const position=await cloudQuery<{idx:string}>(`select (n-1)::text as idx from capital_grow.workspace cross join lateral jsonb_array_elements(payload->'batches') with ordinality as x(b,n) where id=1 and b->>'id'=$1`,[id]);
+   if(!position.rows[0])throw Error('Upload batch not found.');
    await cloudQuery(`with updated as (
     update capital_grow.workspace set payload=jsonb_set(
      jsonb_set(payload,array['batches',$1],(payload #> array['batches',$1]) || $2::jsonb),
@@ -74,7 +82,7 @@ async function mutateSync<T>(id:string,change:(state:Pick<Store,'batches'|'opera
      revision=revision+1,updated_at=now() where id=1
     returning revision,payload,source_hash
    ) insert into capital_grow.workspace_versions(revision,payload,source_hash)
-      select revision,payload,source_hash from updated`,[String(index),patch,JSON.stringify(state.audit)]);
+      select revision,payload,source_hash from updated`,[position.rows[0].idx,patch,JSON.stringify(state.audit)]);
   }
   return result;
  });
@@ -82,8 +90,9 @@ async function mutateSync<T>(id:string,change:(state:Pick<Store,'batches'|'opera
 async function nextPendingBatch(){
  if(!useCloudStorage())return pendingInOrder((await readStore()).batches)[0];
  const {rows}=await cloudQuery<{batch:Batch}>(`
+  with source as materialized (select id,payload from capital_grow.workspace_read where id=1)
   select b - 'rows' as batch
-  from capital_grow.workspace w cross join lateral jsonb_array_elements(w.payload->'batches') b
+  from source w cross join lateral jsonb_array_elements(w.payload->'batches') b
   where w.id=1 and b->>'googleSync' is null and (b->>'valid')::integer>0
     and jsonb_array_length(coalesce(nullif(b->'poolAppends','null'::jsonb),'[]'::jsonb))>0
   order by b->>'at',b->>'id' limit 1

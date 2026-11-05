@@ -29,13 +29,6 @@ export function cloudPool(alternate=false,auth=false){
  return shared[key];
 }
 export function cloudQuery<T extends QueryResultRow=QueryResultRow>(sql:string,values:unknown[]=[]){return (shared.__cgCloudTransaction!.getStore()||cloudPool()).query<T>(sql,values)}
-function cloudImportWrite(sql:string,values:unknown[]=[]){
- const client=shared.__cgCloudTransaction!.getStore();
- if(!client)throw new Error('Import write requires a transaction.');
- const query={text:sql,values,query_timeout:80000};
- return client.query(query);
-}
-// Authentication must not wait behind a large import's occupied connection.
 export async function authQuery<T extends QueryResultRow=QueryResultRow>(sql:string,values:unknown[]=[]){
  let client:PoolClient;
  try{client=await cloudPool(false,true).connect();}
@@ -73,7 +66,7 @@ export async function cloudTransaction<T>(fn:()=>Promise<T>,alternate=false){
  }finally{client.release(discard);client.removeListener('error',onDisconnect);}
 }
 export async function readCloudStore(view=false,includeContacts=true){
- const sql=view?`select
+ const sql=view?`with source as materialized (select payload from capital_grow.workspace_read where id=1) select
   (payload - array['leads','batches','audit','sales','transfers']) || jsonb_build_object(
    'leads',case when $1::boolean then coalesce((select jsonb_agg(l-'custom' order by n) from jsonb_array_elements(payload->'leads') with ordinality as x(l,n)),'[]'::jsonb) else '[]'::jsonb end,
    'batches',coalesce((select jsonb_agg((b-array['rows','poolAppends','rawArchive']) || jsonb_build_object(
@@ -85,7 +78,7 @@ export async function readCloudStore(view=false,includeContacts=true){
    'audit',coalesce((select jsonb_agg(a-array['old','next'] order by n) from jsonb_array_elements(payload->'audit') with ordinality as x(a,n) where n<=100),'[]'::jsonb),
    'auditTotal',coalesce(jsonb_array_length(payload->'audit'),0),
    'sales',coalesce((select jsonb_agg(a-'artifact' order by n) from jsonb_array_elements(nullif(payload->'sales','null'::jsonb)) with ordinality as x(a,n)),'[]'::jsonb)
-  ) as payload from capital_grow.workspace where id=1`:'select payload from capital_grow.workspace where id=1';
+  ) as payload from source`:'select payload from capital_grow.workspace_read where id=1';
  for(let attempt=0;;attempt++){
   try{
    const {rows}=await (attempt===0?cloudQuery(sql,view?[includeContacts]:[]):cloudPool(true).query(sql,view?[includeContacts]:[]));
@@ -99,13 +92,13 @@ export async function readCloudStore(view=false,includeContacts=true){
 }
 // Sync polling only needs authorization and queue metadata.
 export async function readCloudSyncStatus():Promise<Store>{
- const sql=`select jsonb_build_object(
+ const sql=`with source as materialized (select payload from capital_grow.workspace_read where id=1) select jsonb_build_object(
   'users',payload->'users','operationsSyncAt',payload->'operationsSyncAt',
   'batches',coalesce((select jsonb_agg(jsonb_build_object(
    'id',b->'id','file',b->'file','at',b->'at','valid',b->'valid','syncJob',b->'syncJob','googleSync',b->'googleSync',
    'appendRanges',case when jsonb_array_length(coalesce(nullif(b->'poolAppends','null'::jsonb),'[]'::jsonb))>0 then '[{}]'::jsonb else '[]'::jsonb end
   )) from jsonb_array_elements(payload->'batches') b),'[]'::jsonb)
- ) as payload from capital_grow.workspace where id=1`;
+  ) as payload from source`;
  const result=await cloudPool().query<{payload:Store}>(sql).catch(error=>{
   if(!isTransientDatabaseError(error))throw error;
   return cloudPool(true).query<{payload:Store}>(sql);
@@ -115,11 +108,11 @@ export async function readCloudSyncStatus():Promise<Store>{
 }
 // Import validation needs identity columns, not contact history or raw import rows.
 export async function readCloudImportStore():Promise<Store>{
- const {rows}=await cloudQuery<{payload:Store}>(`select jsonb_build_object(
+ const {rows}=await cloudQuery<{payload:Store}>(`with source as materialized (select payload from capital_grow.workspace_read where id=1) select jsonb_build_object(
   'users',payload->'users','branches',payload->'branches','languages',payload->'languages','operations',payload->'operations',
   'leads',coalesce((select jsonb_agg(jsonb_build_object('id',l->'id','name',l->'name','phone',l->'phone','email',l->'email') order by n) from jsonb_array_elements(payload->'leads') with ordinality as x(l,n)),'[]'::jsonb),
   'batches',coalesce((select jsonb_agg(jsonb_build_object('id',b->'id','file',b->'file','confirmationToken',b->'confirmationToken','valid',b->'valid','duplicates',b->'duplicates','branchId',b->'branchId','by',b->'by','googleSync',b->'googleSync','poolAppends',b->'poolAppends') order by n) from jsonb_array_elements(payload->'batches') with ordinality as x(b,n)),'[]'::jsonb)
- ) as payload from capital_grow.workspace where id=1`);
+ ) as payload from source`);
  if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized.');
  return rows[0].payload;
 }
@@ -145,10 +138,12 @@ export async function reserveRecords(s:Store,before:Store){
 }
 export async function mutateCloudStore<T>(fn:(s:Store)=>T|Promise<T>){return cloudTransaction(async()=>{
  const {rows}=await cloudQuery('select payload,revision,source_hash from capital_grow.workspace where id=1 for update');if(!rows[0])throw new DeploymentError('The cloud workspace has not been initialized. Import the private local workspace with npm run cloud:initialize before using this deployment.');
- const s=rows[0].payload as Store,before=structuredClone(s),result=await fn(s);
+ const effective=await cloudQuery('select payload from capital_grow.workspace_read where id=1');
+ const s=effective.rows[0].payload as Store,before=structuredClone(s),result=await fn(s);
  if(JSON.stringify(s)!==JSON.stringify(before)){
   await reserveRecords(s,before);
   const updated=await cloudQuery('update capital_grow.workspace set payload=$1,revision=revision+1,updated_at=now() where id=1 returning revision,source_hash',[s]);
+  await cloudQuery('update capital_grow.pipeline_imports set absorbed=true where not absorbed');
   await cloudQuery('insert into capital_grow.workspace_versions(revision,payload,source_hash) values($1,$2,$3)',[updated.rows[0].revision,s,updated.rows[0].source_hash]);
  }
  return result;
@@ -178,52 +173,10 @@ async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boole
   const operations=(s.operations??[]).slice(operationCount);
   for(const record of operations)if(record.file.trim())await cloudQuery(
    'insert into capital_grow.file_reservations(normalized_name,operation_id) values(lower(btrim($1)),$2) on conflict do nothing',[record.file,record.id]);
-  // Stream bounded parameter chunks instead of one multi-megabyte pooler message.
-  const incoming=s.leads.slice(leadCount),batch=s.batches[0];
-  const validRows=batch.rows.filter(row=>row.state==='Valid');
-  // Raw source cells already exist in the batch. Reattach them in Postgres.
-  const compact=incoming.length===validRows.length&&incoming.every((lead,i)=>lead.custom===validRows[i].raw);
-  const leads=compact?incoming.map(({custom,...lead})=>{void custom;return lead;}):incoming;
-  const archived=await archiveBatchRows(batch);
-  // If raw cells are archived, keep lead custom cells intact for normal lead access.
-  const payload=JSON.stringify([archived.rawArchive?incoming:leads,[archived],operations,s.audit,compact&&!archived.rawArchive]);
-  const needsStaging=Buffer.byteLength(payload)>96000;
-  if(needsStaging){
-   phase='prepare import staging';
-   await cloudQuery('create temporary table cg_import_chunks (part integer primary key, body text not null) on commit drop');
-   phase='transfer import rows';
-   let part=0;
-   for(let start=0;start<payload.length;){
-    let end=Math.min(start+96000,payload.length);
-    if(end<payload.length&&/[\uD800-\uDBFF]/.test(payload[end-1]))end--;
-    await cloudQuery('insert into pg_temp.cg_import_chunks(part,body) values($1,$2)',[part++,payload.slice(start,end)]);
-    start=end;
-   }
-  }
-  phase='apply import';
-  // Rewriting the workspace JSON and its snapshot can exceed the normal read deadline.
-  await cloudQuery("set local statement_timeout = '70s'");
-  const deltaSource=needsStaging?"select string_agg(body,'' order by part)::jsonb as delta from pg_temp.cg_import_chunks":'select $1::jsonb as delta';
-  await cloudImportWrite(`with staged as (
-    ${deltaSource}
-   ), restored as (
-    select delta,case when (delta->>4)::boolean then coalesce((
-     select jsonb_agg(lead||jsonb_build_object('custom',raw) order by ord)
-     from jsonb_array_elements(delta->0) with ordinality as l(lead,ord)
-     join (select item->'raw' as raw,row_number() over(order by n) as rn
-      from jsonb_array_elements(delta#>'{1,0,rows}') with ordinality as r(item,n)
-      where item->>'state'='Valid') r on rn=ord
-    ),'[]'::jsonb) else delta->0 end as leads from staged
-   )
-    update capital_grow.workspace set payload=payload||jsonb_build_object(
-     'leads',coalesce(payload->'leads','[]'::jsonb)||leads,
-     'batches',(delta->1)||coalesce(payload->'batches','[]'::jsonb),
-     'operations',coalesce(payload->'operations','[]'::jsonb)||(delta->2),
-     'audit',(delta->3)||coalesce(payload->'audit','[]'::jsonb)),
-     revision=revision+1,updated_at=now() from restored where id=1`,needsStaging?[]:[payload]);
-  phase='save import version';
-  await cloudImportWrite(`insert into capital_grow.workspace_versions(revision,payload,source_hash)
-   select revision,payload,source_hash from capital_grow.workspace where id=1`);
+  phase='append pipeline import';
+  const batch=await archiveBatchRows(s.batches[0]);
+  await cloudQuery(`insert into capital_grow.pipeline_imports(id,confirmation_token,batch,leads,operations,audit)
+   values($1,$2,$3,$4,$5,$6)`,[batch.id,batch.confirmationToken,JSON.stringify(batch),JSON.stringify(s.leads.slice(leadCount)),JSON.stringify(operations),JSON.stringify(s.audit)]);
   phase='commit';
   return result;
  },alternate);}catch(error){

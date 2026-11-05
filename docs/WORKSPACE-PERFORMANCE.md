@@ -12,3 +12,11 @@ Local fixture measurements (HTTP round trip; 50 rows included the first workbook
 Browser follow-up: with DevTools Network throttled, submit a 10,000-row file, confirm that the button shows feedback immediately and only one preview request starts, change a mapping or click Cancel, then confirm the old results never appear. Navigate to MMS receipts during a check, return, and validate again. Compare the `Server-Timing` values and record click-to-paint in the Performance panel. Confirm an import from a current preview and verify an outdated token is rejected. The HTTP fixture and production smoke checks do not replace these browser checks.
 
 If live preview latency remains high, profile the pool workbook download and Supabase region/network separately. A normalized phone/email index in Supabase could further reduce the 1.94 MB read; preserve matching precedence and transaction-time confirmation before migrating.
+
+## Separate import storage
+
+New imports are saved in `capital_grow.pipeline_imports` as independent batches, lead arrays, receipts, and audit records. They no longer rewrite the large legacy workspace or create a full workspace snapshot on each import. The import row itself is the durable recovery record; its confirmation token is unique. Existing data remains in `workspace`.
+
+`workspace_read` combines legacy data and unabsorbed imports for reads. General workspace mutations lock the legacy row, read the combined view, and mark folded imports absorbed in the same transaction. Google sync updates a new batch's ledger metadata directly. Export and duplicate checks read the combined data, and purchase costs remain attached to the original batch.
+
+Apply `20261105090000_pipeline_import_ledger.sql` before deploying this version. The table has RLS enabled, no anon/authenticated access, and explicit access for the restricted server database role. The read view uses security-invoker permissions. A live 1,999-lead synthetic append/readback test completed in 32 seconds; its transaction was rolled back and checked for removal. This does not establish a production latency guarantee.

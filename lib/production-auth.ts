@@ -1,5 +1,5 @@
 import {createClient,type SupabaseClient} from '@supabase/supabase-js';
-import {cloudQuery} from './cloud-database';
+import {authQuery} from './cloud-database';
 import type {Store,User} from './types';
 export class SignInError extends Error{constructor(message:string,public status=401,public needsMfa=false){super(message)}}
 export type Credentials={email:string;password:string;code?:string};
@@ -20,7 +20,7 @@ export function memberUser(member:Membership|undefined,authId:string,email:strin
  return {...existing,name:member.name,email:member.email,role:member.role,branchIds:member.branch_ids};
 }
 type Query=(sql:string,values?:unknown[])=>Promise<{rows:Membership[]}>;
-export async function authenticateCredentials(credentials:Credentials,workspace:Pick<Store,'users'>|(()=>Promise<Pick<Store,'users'>>),client:SupabaseClient=productionAuthClient(),query:Query=cloudQuery){
+export async function authenticateCredentials(credentials:Credentials,workspace:Pick<Store,'users'>|(()=>Promise<Pick<Store,'users'>>),client:SupabaseClient=productionAuthClient(),query:Query=authQuery){
  const email=credentials.email.trim().toLowerCase();
  const {data,error}=await client.auth.signInWithPassword({email,password:credentials.password});
  if(error||!data.session)throw new SignInError('Email or password is incorrect, or the account is not confirmed.');

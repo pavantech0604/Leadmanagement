@@ -1,7 +1,7 @@
 import {cookies} from 'next/headers';
 import {SignJWT,jwtVerify} from 'jose';
 import {randomBytes} from 'node:crypto';
-import {cloudEnabled,cloudQuery} from './cloud-database';
+import {cloudEnabled,authQuery} from './cloud-database';
 import {memberUser,type Membership} from './production-auth';
 import {Store} from './types';
 const secret=new TextEncoder().encode(process.env.SESSION_SECRET||randomBytes(32).toString('hex'));
@@ -10,7 +10,7 @@ export async function session(s:Store){const token=(await cookies()).get('bf-ses
  const {payload}=await jwtVerify(token,secret,{algorithms:['HS256'],issuer,audience});
  if(cloudEnabled()||process.env.NODE_ENV==='production'){
   if(payload.method!=='supabase'||typeof payload.authId!=='string'||typeof payload.email!=='string')return null;
-  const {rows}=await cloudQuery('select email,auth_user_id,app_user_id,name,role,branch_ids,active from capital_grow.memberships where auth_user_id=$1 and active=true',[payload.authId]);
+  const {rows}=await authQuery('select email,auth_user_id,app_user_id,name,role,branch_ids,active from capital_grow.memberships where auth_user_id=$1 and active=true',[payload.authId]);
   const member=rows[0] as Membership|undefined;if(!member||member.app_user_id!==payload.sub)return null;
   return memberUser(member,payload.authId,payload.email,s);
  }

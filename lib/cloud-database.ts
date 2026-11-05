@@ -8,22 +8,22 @@ import {createHash} from 'node:crypto';
 import type {Store} from './types';
 
 export const cloudEnabled=()=>process.env.STORAGE_BACKEND==='supabase';
-const shared=globalThis as typeof globalThis&{__cgCloudPool?:Pool;__cgReadFallbackPool?:Pool;__cgCloudTransaction?:AsyncLocalStorage<PoolClient>};
+const shared=globalThis as typeof globalThis&{__cgCloudPool?:Pool;__cgReadFallbackPool?:Pool;__cgAuthPool?:Pool;__cgAuthFallbackPool?:Pool;__cgCloudTransaction?:AsyncLocalStorage<PoolClient>};
 shared.__cgCloudTransaction??=new AsyncLocalStorage<PoolClient>();
-export function cloudPool(alternate=false){
- const key=alternate?'__cgReadFallbackPool':'__cgCloudPool';
+export function cloudPool(alternate=false,auth=false){
+ const key=auth?(alternate?'__cgAuthFallbackPool':'__cgAuthPool'):(alternate?'__cgReadFallbackPool':'__cgCloudPool');
  if(!shared[key]){
   const connectionString=process.env.SUPABASE_DATABASE_URL;
   if(!connectionString)throw new DeploymentError('Secure database connection is not configured.');
   const url=databaseConnectionUrl(connectionString);
   const local=['localhost','127.0.0.1','[::1]'].includes(url.hostname);
   if(alternate){
-   if(!url.hostname.endsWith('.pooler.supabase.com')||!['','5432','6543'].includes(url.port))return cloudPool();
+   if(!url.hostname.endsWith('.pooler.supabase.com')||!['','5432','6543'].includes(url.port))return cloudPool(false,auth);
    url.port=url.port==='6543'?'5432':'6543';
   }
   // Never allow connection-string options to weaken TLS.
   for(const name of ['sslmode','sslcert','sslkey','sslrootcert'])url.searchParams.delete(name);
-  shared[key]=new Pool({connectionString:url.toString(),max:alternate?1:2,connectionTimeoutMillis:8000,idleTimeoutMillis:15000,statement_timeout:30000,query_timeout:35000,keepAlive:true,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_CERT?{ca:process.env.SUPABASE_DB_CA_CERT.replace(/\\n/g,'\n')}:process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
+  shared[key]=new Pool({connectionString:url.toString(),max:auth||alternate?1:2,connectionTimeoutMillis:8000,idleTimeoutMillis:15000,statement_timeout:30000,query_timeout:35000,keepAlive:true,ssl:local?false:{rejectUnauthorized:true,...(process.env.SUPABASE_DB_CA_CERT?{ca:process.env.SUPABASE_DB_CA_CERT.replace(/\\n/g,'\n')}:process.env.SUPABASE_DB_CA_PATH?{ca:fs.readFileSync(process.env.SUPABASE_DB_CA_PATH,'utf8')}: {})}});
   shared[key].on('error',error=>console.warn('Idle Supabase connection closed',{code:(error as {code?:string}).code}));
  }
  return shared[key];
@@ -34,6 +34,17 @@ function cloudImportWrite(sql:string,values:unknown[]=[]){
  if(!client)throw new Error('Import write requires a transaction.');
  const query={text:sql,values,query_timeout:80000};
  return client.query(query);
+}
+// Authentication must not wait behind a large import's occupied connection.
+export async function authQuery<T extends QueryResultRow=QueryResultRow>(sql:string,values:unknown[]=[]){
+ let client:PoolClient;
+ try{client=await cloudPool(false,true).connect();}
+ catch(error){if(!isTransientDatabaseError(error))throw error;client=await cloudPool(true,true).connect();}
+ let broken=false;
+ const onError=()=>{broken=true;};client.on('error',onError);
+ try{return await client.query<T>(sql,values);}
+ catch(error){broken=isTransientDatabaseError(error)||/query read timeout/i.test(error instanceof Error?error.message:'');throw error;}
+ finally{client.release(broken);client.removeListener('error',onError);}
 }
 export async function cloudTransaction<T>(fn:()=>Promise<T>,alternate=false){
  if(shared.__cgCloudTransaction!.getStore())return fn();
@@ -223,4 +234,4 @@ async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boole
 export async function readCloudSource(){const {rows}=await cloudQuery('select s.hash,s.content from capital_grow.source_workbooks s join capital_grow.workspace w on w.source_hash=s.hash where w.id=1');if(!rows[0])throw new Error('The source workbook is not imported.');return {hash:String(rows[0].hash),buffer:rows[0].content as Buffer}}
 export async function saveCloudSource(buffer:Buffer){const hash=createHash('sha256').update(buffer).digest('hex');await cloudQuery('insert into capital_grow.source_workbooks(hash,content) values($1,$2) on conflict do nothing',[hash,buffer]);await cloudQuery('update capital_grow.workspace set source_hash=$1 where id=1',[hash]);return hash}
 export async function securityEvent(actor:string|null,event:string,details:Record<string,unknown>={}){if(cloudEnabled())await cloudQuery('insert into capital_grow.security_events(actor_id,event,details) values($1,$2,$3)',[actor,event,details])}
-export async function rateLimit(key:string,max:number,seconds:number){if(!cloudEnabled())return;const {rows}=await cloudQuery(`insert into capital_grow.rate_limits(key,window_start,count) values($1,now(),1) on conflict(key) do update set count=case when capital_grow.rate_limits.window_start < now()-make_interval(secs=>$2) then 1 else capital_grow.rate_limits.count+1 end, window_start=case when capital_grow.rate_limits.window_start < now()-make_interval(secs=>$2) then now() else capital_grow.rate_limits.window_start end returning count`,[key,seconds]);if(rows[0].count>max)throw new Error('Too many requests. Please wait and try again.');}
+export async function rateLimit(key:string,max:number,seconds:number,query:typeof cloudQuery=cloudQuery){if(!cloudEnabled())return;const {rows}=await query(`insert into capital_grow.rate_limits(key,window_start,count) values($1,now(),1) on conflict(key) do update set count=case when capital_grow.rate_limits.window_start < now()-make_interval(secs=>$2) then 1 else capital_grow.rate_limits.count+1 end, window_start=case when capital_grow.rate_limits.window_start < now()-make_interval(secs=>$2) then now() else capital_grow.rate_limits.window_start end returning count`,[key,seconds]);if(rows[0].count>max)throw new Error('Too many requests. Please wait and try again.');}

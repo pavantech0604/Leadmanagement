@@ -4,11 +4,12 @@ import {z} from 'zod';
 import {authenticateCredentials,SignInError} from '@/lib/production-auth';
 import type {User} from '@/lib/types';
 import {signIn} from '@/lib/auth';
-import {cloudEnabled,cloudQuery,rateLimit,securityEvent} from '@/lib/cloud-database';
+import {cloudEnabled,authQuery,rateLimit,securityEvent} from '@/lib/cloud-database';
 export const runtime='nodejs';
 export const maxDuration=60;
 const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'no-store'}});
 export async function POST(req:NextRequest){
+ let phase='validate';
  try{
   const origin=req.headers.get('origin');if(!origin||new URL(origin).host!==req.headers.get('host'))return reply({error:'Invalid request origin.'},403);
   if(!cloudEnabled())return reply({error:'Secure hosted sign-in requires the Supabase storage configuration.'},503);
@@ -16,9 +17,11 @@ export async function POST(req:NextRequest){
   if(!credentials.success)return reply({error:'Enter a valid email, password and, if requested, six-digit authenticator code.'},400);
   const address=(req.headers.get('x-forwarded-for')||'unknown').split(',')[0].trim();
   const fingerprint=createHash('sha256').update(address).digest('hex');
-  await rateLimit('signin:'+fingerprint,20,600);
+  phase='rate limit';
+  await rateLimit('signin:'+fingerprint,20,600,authQuery);
+  phase='identity and membership';
   const result=await authenticateCredentials(credentials.data,async()=>{
-   const {rows}=await cloudQuery<{users:User[]}>("select payload->'users' as users from capital_grow.workspace where id=1");
+   const {rows}=await authQuery<{users:User[]}>("select payload->'users' as users from capital_grow.workspace where id=1");
    return {users:rows[0]?.users??[]};
   });
   await signIn(result.user.id,{authId:result.authId,email:result.email});
@@ -27,6 +30,7 @@ export async function POST(req:NextRequest){
  }catch(error){
   if(error instanceof SignInError)return reply({error:error.message,needsMfa:error.needsMfa},error.status);
   if(error instanceof Error&&error.message.startsWith('Too many requests'))return reply({error:'Too many sign-in attempts. Please wait ten minutes and retry.'},429);
+  console.warn('Sign-in service interrupted',JSON.stringify({phase,code:(error as {code?:string})?.code,type:error instanceof Error?error.name:'Error'}));
   return reply({error:'Sign-in is temporarily unavailable. Check the authentication and database settings, then retry.'},503);
  }
 }

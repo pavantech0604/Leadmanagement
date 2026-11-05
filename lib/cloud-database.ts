@@ -28,6 +28,12 @@ export function cloudPool(alternate=false){
  return shared[key];
 }
 export function cloudQuery<T extends QueryResultRow=QueryResultRow>(sql:string,values:unknown[]=[]){return (shared.__cgCloudTransaction!.getStore()||cloudPool()).query<T>(sql,values)}
+function cloudImportWrite(sql:string,values:unknown[]=[]){
+ const client=shared.__cgCloudTransaction!.getStore();
+ if(!client)throw new Error('Import write requires a transaction.');
+ const query={text:sql,values,query_timeout:80000};
+ return client.query(query);
+}
 export async function cloudTransaction<T>(fn:()=>Promise<T>,alternate=false){
  if(shared.__cgCloudTransaction!.getStore())return fn();
  let client:PoolClient;
@@ -181,8 +187,10 @@ async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boole
    }
   }
   phase='apply import';
+  // Rewriting the workspace JSON and its snapshot can exceed the normal read deadline.
+  await cloudQuery("set local statement_timeout = '70s'");
   const deltaSource=needsStaging?"select string_agg(body,'' order by part)::jsonb as delta from pg_temp.cg_import_chunks":'select $1::jsonb as delta';
-  await cloudQuery(`with staged as (
+  await cloudImportWrite(`with staged as (
     ${deltaSource}
    ), restored as (
     select delta,case when (delta->>4)::boolean then coalesce((
@@ -200,7 +208,7 @@ async function appendCloudImportOnce<T>(fn:(s:Store)=>Promise<T>,alternate:boole
      'audit',(delta->3)||coalesce(payload->'audit','[]'::jsonb)),
      revision=revision+1,updated_at=now() from restored where id=1`,needsStaging?[]:[payload]);
   phase='save import version';
-  await cloudQuery(`insert into capital_grow.workspace_versions(revision,payload,source_hash)
+  await cloudImportWrite(`insert into capital_grow.workspace_versions(revision,payload,source_hash)
    select revision,payload,source_hash from capital_grow.workspace where id=1`);
   phase='commit';
   return result;
